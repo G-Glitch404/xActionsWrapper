@@ -20,6 +20,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     ca-certificates \
     tini \
+    nano \
     chromium \
     fonts-liberation \
     libnss3 \
@@ -62,4 +63,4 @@ RUN mkdir -p /data/.xactions
 EXPOSE 9096
 
 ENTRYPOINT ["tini", "--"]
-CMD ["python3", "-m", "src"]
+CMD ["uv", "run", "python", "-m", "src"]
