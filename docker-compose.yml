@@ -3,7 +3,7 @@ services:
     container_name: xactions-api-app
     restart: unless-stopped
     stop_grace_period: 30s
-    image: xactions-api:latest
+    image: localhost/xactions-api:latest
     build:
       context: .
       dockerfile: Dockerfile
