@@ -1,0 +1,25 @@
+services:
+  xactions-api:
+    container_name: xactions-api-app
+    restart: unless-stopped
+    stop_grace_period: 30s
+    image: xactions-api:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "${PORT}:${PORT}"
+    environment:
+      TZ: UTC
+      XACTIONS_AUTH_TOKEN: ${XACTIONS_AUTH_TOKEN}
+    volumes:
+      - xactions_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://${HOST}:${PORT}/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+volumes:
+  xactions_data:
