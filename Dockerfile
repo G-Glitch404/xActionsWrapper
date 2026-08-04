@@ -53,7 +53,8 @@ RUN curl -LsSf https://astral.sh/uv/install.sh | sh
 COPY pyproject.toml uv.lock /app/
 RUN uv sync --locked --no-dev
 
-RUN npm install -g xactions \
+RUN npm init -y \
+ && npm install xactions \
  && npm cache clean --force
 
 COPY src /app/src
