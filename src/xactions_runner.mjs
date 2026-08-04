@@ -20,6 +20,7 @@ const authToken =
 const browser = await createBrowser({
   headless: true,
   args: ["--no-sandbox", "--disable-setuid-sandbox"],
+  protocolTimeout: 1200000,
 })
 
 try {
