@@ -1,79 +1,65 @@
 # xActions Wrapper
 
-A small FastAPI microservice for scraping X data through **xActions**, packaged to run inside Docker.
+A FastAPI microservice for scraping X content through **xActions**, packaged to run inside Docker.
 
-The goal is simple: expose a clean HTTP API around a browser-based scraper, keep the runtime isolated, and make the service predictable enough to drop into a larger automation pipeline.
+This project is built to keep scraping isolated, repeatable, and easy to plug into automation workflows without turning the host machine into a dependency mess. The service exposes a narrow HTTP API around browser-driven scraping, then returns structured JSON that can be consumed by other scripts, pipelines, or downstream analytics.
 
-## What this project is for
+## What this project does
 
-This app wraps xActions behind two HTTP endpoints:
+This app currently exposes two endpoints:
 
 - scrape tweets from one account or multiple accounts, one by one
-- scrape tweets from an X list timeline
+- scrape any X timeline URL, including list timelines and other timeline-style pages
 
-It is intentionally narrow in scope. The service does not try to be a general data platform, a queue worker, or a database-backed scraper farm. It is a small microservice with a focused job: receive a request, validate it, run the scrape, return JSON.
+The project is intentionally focused. It is not a database, not a queue worker, and not a general analytics platform. It is a microservice whose job is to accept a request, validate it, launch the scraper, and return usable data.
 
-That design keeps the code easier to reason about and much easier to deploy.
+## Why Docker is part of the design
 
-## Why this exists
+This project depends on more than Python.
 
-Running browser automation directly on a host machine becomes messy fast.
-
-xActions needs the right mix of:
+The runtime needs:
 
 - Python
 - Node.js
-- Chromium and its system libraries
-- a working cookie/session if the page requires authentication
+- Chromium
+- Chrome system libraries
+- xActions
+- a valid X auth cookie for authenticated pages
 
-When those dependencies live on the host, they drift. One update breaks another project. One missing library breaks Chromium. One package manager pollutes the next environment.
+Installing all of that directly on the host works until it does not. Packages drift. Browser dependencies break. One project contaminates another. The container avoids that by bundling the entire runtime into one repeatable image.
 
-Docker solves that by packaging the whole stack into one image. The container carries the exact runtime it needs, and nothing else.
+Docker gives this project four practical advantages:
 
-## Why Docker is the right fit here
+### Reproducibility
+The same image runs the same way on a laptop, a VPS, or a CI machine.
 
-This project is a good candidate for a container for a few practical reasons.
+### Isolation
+Python, Node, Chromium, and xActions stay inside the container instead of touching the host.
 
-### 1. Reproducibility
+### Deployment simplicity
+You build once, then run the container anywhere that supports Docker.
 
-The same image should work the same way on a laptop, a VPS, or a build server.
+### Failure containment
+If the scraper crashes, it crashes inside the container, not on your system.
 
-### 2. Isolation
+## The Python environment issue
 
-The container keeps Python, Node.js, xActions, and Chromium away from your host system.
+A common source of confusion in projects like this is not Python itself, but the surrounding environment.
 
-### 3. Easier deployment
+You may run into problems like:
 
-Instead of setting up a local Python environment, a Node environment, and Chromium dependencies separately, you build one image and run one container.
-
-### 4. Better failure boundaries
-
-If the scraper fails, it fails inside the container. Your host remains clean.
-
-### 5. Easier upgrades
-
-You can rebuild the image when you want to change xActions, Chromium, or the Python runtime without rewriting the rest of your system.
-
-## About the Python 3.12 / environment issue
-
-A common source of confusion in projects like this is not Python itself, but the environment around it.
-
-You may see issues like:
-
-- packages installed into one environment but the app starts with another
-- `uv` syncing dependencies into a different interpreter than the one used at runtime
-- `uvicorn` or another dependency missing even though installation appeared successful
+- dependencies installed into one environment, but the app starts with another
+- `uv` syncing packages into a different interpreter than the one used at runtime
+- `uvicorn` missing even though installation looked successful
 - local Python behaving differently from the container Python
 
-That is why this project is container-first.
+That is why this repo is container-first.
 
-The image controls the Python version, the installed dependencies, and the startup command. That removes a lot of the uncertainty that comes with local system Python setups.
-
-If you ever see a `ModuleNotFoundError` for `uvicorn` or another package, the first thing to check is whether the app is running inside the same environment where dependencies were installed.
+The image defines the Python version, the dependencies, the browser stack, and the startup command. That removes most environment drift. If you see a `ModuleNotFoundError`, the first thing to verify is whether the app is running in the same environment where the dependencies were installed.
 
 ## Architecture
 
-The project is split into a few small pieces:
+The project is split into a few small pieces so the code stays readable and maintainable:
 
 - `src/items.py` contains Pydantic models
 - `src/api.py` contains the FastAPI routes
@@ -81,7 +67,7 @@ The project is split into a few small pieces:
 - `src/xactions_runner.mjs` bridges Python to Node/xActions
 - `src/__main__.py` starts the API server
 
-This keeps the API code separate from the scraper execution code. That matters when the project grows, because route definitions, request validation, and browser logic tend to evolve at different speeds.
+That split keeps request validation, endpoint routing, and browser automation from getting tangled together.
 
 ## API endpoints
 
@@ -89,7 +75,7 @@ This keeps the API code separate from the scraper execution code. That matters w
 
 Scrape tweets from one account or multiple accounts.
 
-The request accepts a list of usernames and processes them one by one.
+The request accepts a list of usernames and processes them one by one. This makes it easy to scrape a single account or batch several accounts in a single call.
 
 #### Request body
 
@@ -109,14 +95,11 @@ The request accepts a list of usernames and processes them one by one.
 | `limit`           | int       | Number of tweets to fetch for each account |
 | `timeout_seconds` | int       | Maximum time allowed for each scrape       |
 
-#### Response example
+#### Response shape
 
 ```json
 {
-  "usernames": [
-    "MustStopMurad",
-    "elonmusk"
-  ],
+  "usernames": ["MustStopMurad", "elonmusk"],
   "limit": 10,
   "count": 2,
   "elapsed_ms": 18420,
@@ -137,9 +120,9 @@ The request accepts a list of usernames and processes them one by one.
 
 ### `POST /v1/scrape/list-timeline`
 
-Scrape tweets from the timeline of an X list.
+Scrape tweets from any timeline URL.
 
-This endpoint is for the list page itself, not the list members endpoint.
+This endpoint is meant for timeline-style pages, including X list timelines and similar timeline views that can be reached from a URL.
 
 #### Request body
 
@@ -155,11 +138,11 @@ This endpoint is for the list page itself, not the list members endpoint.
 
 | Field             | Type | Description                                 |
 |-------------------|------|---------------------------------------------|
-| `list_url`        | str  | Full X list URL                             |
+| `list_url`        | str  | Full timeline URL                           |
 | `limit`           | int  | Maximum number of timeline items to collect |
 | `timeout_seconds` | int  | Maximum time allowed for the scrape         |
 
-#### Response example
+#### Response shape
 
 ```json
 {
@@ -171,32 +154,78 @@ This endpoint is for the list page itself, not the list members endpoint.
 }
 ```
 
-## What the list endpoint is doing
+## What the timeline endpoint does
 
-There is an important distinction here.
+This endpoint treats the target as a live timeline page. That means the service loads the URL, scrolls through the visible content, and extracts tweet objects from the page.
 
-A list on X can mean two different things:
+It is not the same thing as scraping list members.
 
-- the list members
-- the timeline of posts shown when you open the list page
+If the URL points to a list timeline, it returns the tweets shown in that timeline. If the URL points to another timeline-style page, the scraper treats it the same way as long as the page structure is compatible.
 
-This service is built for the second case: the timeline view.
+## Extracted tweet data
 
-That means the endpoint treats the list page like a live feed and extracts the tweets visible there. It is not the same as asking for every member of the list.
+The scraper now returns richer tweet objects than the old version.
 
-## How the service works
+A typical extracted item can include:
 
-The request flow is deliberately simple:
+```json
+{
+  "tweet_id": "1940123456789012345",
+  "tweet_url": "https://x.com/user/status/1940123456789012345",
+  "account_name": "Memecoin Daddy",
+  "username": "Raghavak0nSol",
+  "verified": true,
+  "text": "3x $VOLE ...",
+  "time": "2026-08-02T09:10:17.000Z",
+  "hashtags": ["SOL", "VOLE"],
+  "has_media": true,
+  "has_photo": true,
+  "has_video": false,
+  "replies": 79,
+  "reposts": 1119,
+  "likes": 18594,
+  "bookmarks": 1337,
+  "views": 645918
+}
+```
 
-1. a client sends HTTP to FastAPI
-2. Pydantic validates the payload
+### Fields returned by the scraper
+
+| Field          | Meaning                                                  |
+|----------------|----------------------------------------------------------|
+| `tweet_id`     | Stable tweet identifier extracted from the status URL    |
+| `tweet_url`    | Permanent link to the tweet                              |
+| `account_name` | Clean display name from the author line                  |
+| `username`     | X handle without the `@`                                 |
+| `verified`     | Whether the account appears verified                     |
+| `text`         | Tweet body text                                          |
+| `time`         | Tweet timestamp in ISO format                            |
+| `hashtags`     | Hashtags extracted from the tweet text and hashtag links |
+| `has_media`    | True if the tweet contains media                         |
+| `has_photo`    | True if the tweet contains a photo                       |
+| `has_video`    | True if the tweet contains a video                       |
+| `replies`      | Reply count                                              |
+| `reposts`      | Repost count                                             |
+| `likes`        | Like count                                               |
+| `bookmarks`    | Bookmark count                                           |
+| `views`        | View count                                               |
+
+This is the data shape that makes the service useful for ranking, scoring, filtering, and downstream analysis.
+
+## Request flow
+
+The runtime flow is intentionally simple:
+
+1. FastAPI receives the request
+2. Pydantic validates the input
 3. Python launches the Node runner
-4. the runner starts xActions with Chromium
-5. xActions opens the page and scrapes the content
-6. JSON is returned to Python
-7. Python returns a structured HTTP response
+4. the runner starts xActions
+5. Chromium loads the page
+6. the scraper extracts data from the DOM
+7. the runner returns JSON
+8. Python returns the response to the client
 
-This keeps the scraper behind a clean interface. Other services do not need to know how xActions works internally.
+This keeps the scraping logic hidden behind a clean HTTP boundary.
 
 ## Project layout
 
@@ -223,30 +252,32 @@ You need:
 
 - Docker
 - Docker Compose
-- an X auth cookie if the page or account requires authentication
+- an X auth cookie if the target page requires authentication
 
 You do not need to install Python, Node.js, Chromium, or xActions on the host machine.
 
 ## Environment variables
 
-The container uses these variables:
+The container uses these values:
 
-| Variable                  | Purpose                                                 |
-|---------------------------|---------------------------------------------------------|
-| `XACTIONS_AUTH_TOKEN`     | X auth cookie passed into the container                 |
-| `XACTIONS_SESSION_COOKIE` | optional alias for the same value                       |
-| `MAX_CONCURRENT_SCRAPES`  | limits how many scrape jobs can run at once             |
-| `DEFAULT_TIMEOUT_SECONDS` | default timeout for scrape requests                     |
-| `PORT`                    | optional port override if you want to customize Compose |
+| Variable                  | Purpose                                                           |
+|---------------------------|-------------------------------------------------------------------|
+| `XACTIONS_AUTH_TOKEN`     | X auth cookie passed into the container                           |
+| `XACTIONS_SESSION_COOKIE` | Optional alias for the same value                                 |
+| `MAX_CONCURRENT_SCRAPES`  | Limits how many scrape jobs can run at once                       |
+| `DEFAULT_TIMEOUT_SECONDS` | Default timeout for scrape requests                               |
+| `HOST`                    | host to connect to defualts to '0.0.0.0'                          |
+| `PORT`                    | port to connect to over docker compose contianer defualts to 9096 |
 
 ## Docker setup
 
 ### 1. Create your `.env`
 
-Place this next to `docker-compose.yml`:
+Put this next to `docker-compose.yml`:
 
 ```env
 XACTIONS_AUTH_TOKEN=your_x_auth_cookie_here
+HOST=0.0.0.0
 PORT=9096
 ```
 
@@ -258,7 +289,7 @@ Do not hardcode the cookie into the image.
 docker compose up --build
 ```
 
-### 3. Check the health endpoint
+### 3. Verify the health endpoint
 
 ```bash
 curl http://localhost:9096/health
@@ -272,7 +303,7 @@ Expected response:
 
 ## Running locally with `uv`
 
-The container is the preferred way to run this service, but local development is still possible if your environment is already set up.
+Docker is the recommended path, but local development is still possible if your environment is already aligned.
 
 Typical local flow:
 
@@ -281,41 +312,52 @@ uv sync
 uv run python -m src
 ```
 
-If the local runtime starts acting strangely, move back to Docker. That is the more reliable path for this project.
+If the local runtime becomes inconsistent, use Docker instead. That is the safer and more repeatable route for this project.
 
-## Why the service is a microservice
+## Why this is a microservice
 
-This project is small by design.
+This project has one job and does it behind a small API.
 
-It is not trying to manage storage, analytics, scheduling, queues, dashboards, or long-term state.
+It does not try to own:
 
-It just exposes a small API that other tools can call.
+- storage
+- dashboards
+- analytics pipelines
+- queue management
+- long-term state
+- user accounts
+- orchestration
 
-That makes it a good microservice candidate:
+That makes it a microservice in the practical sense:
 
-- it has a narrow responsibility
-- it is easy to deploy independently
-- it can be called from Python, Node, cron jobs, or another backend
-- it can be replaced or upgraded without touching the rest of the system
+- small surface area
+- easy to deploy independently
+- easy to swap or upgrade
+- easy to call from other tools
+- easy to keep focused
 
-That is useful when you want to integrate scraping into a larger workflow without turning the scraper itself into a monolith.
+That design is useful when you want scraping as a building block instead of a giant application.
 
 ## Curl tests
 
 ### Test 1: scrape tweets from accounts
 
 ```bash
-curl -X POST http://localhost:9096/v1/scrape/tweets   -H "Content-Type: application/json"   -d '{
+curl -X POST http://localhost:9096/v1/scrape/tweets \
+  -H "Content-Type: application/json" \
+  -d '{
     "usernames": ["MustStopMurad", "elonmusk"],
     "limit": 10,
     "timeout_seconds": 120
   }'
 ```
 
-### Test 2: scrape a list timeline
+### Test 2: scrape a timeline URL
 
 ```bash
-curl -X POST http://localhost:9096/v1/scrape/list-timeline   -H "Content-Type: application/json"   -d '{
+curl -X POST http://localhost:9096/v1/scrape/list-timeline \
+  -H "Content-Type: application/json" \
+  -d '{
     "list_url": "https://x.com/i/lists/1234567890",
     "limit": 100,
     "timeout_seconds": 120
@@ -326,87 +368,86 @@ curl -X POST http://localhost:9096/v1/scrape/list-timeline   -H "Content-Type: a
 
 A failed scrape does not always mean the code is broken.
 
-Possible causes include:
+Common causes include:
 
 - the account is private
-- the cookie is missing or invalid
+- the auth cookie is missing or invalid
+- the target URL is wrong
 - X changed the page structure
 - the browser timed out
-- the list URL is wrong
-- the account or list is rate-limited
+- the page was rate-limited
+- the current session needs to be refreshed
 
-In other words, scraping problems often come from the page, not just the code.
+Scraping failures are often page issues, not API issues.
 
 ## Troubleshooting
 
 ### `ModuleNotFoundError: uvicorn`
 
-This means Python is starting outside the environment where `uvicorn` was installed.
+This usually means the app is starting in a Python environment that does not contain the installed dependencies.
 
-Common fixes:
+Check that:
 
-- check that `uvicorn` is in `pyproject.toml`
-- make sure the container is built after dependency changes
-- make sure `uv sync` and the runtime interpreter match
+- `uvicorn` is present in `pyproject.toml`
+- the image was rebuilt after dependency changes
+- the runtime interpreter matches the environment used to install packages
 
-### `xactions: command not found`
+### `ERR_MODULE_NOT_FOUND: Cannot find package 'xactions'`
 
-This usually means xActions is not installed in the path your shell is using.
+This usually means the Node runner cannot resolve the package in its current module path.
 
-Inside Docker, this should not be a problem if the image installs xActions correctly during build.
+Inside the container, xActions should be installed in a way that Node can import it from the project runtime. If the package was only installed globally, the ESM import may fail.
 
 ### Empty tweet output
 
-If the endpoint returns an empty array, common reasons are:
+If the endpoint returns an empty array, likely causes are:
 
 - the page did not expose tweet cards
-- the account is private or inaccessible
-- the auth cookie is missing
-- the target list URL is incorrect
-- the browser session needs to be refreshed
+- the target account is private or inaccessible
+- the cookie is missing
+- the timeline URL is incorrect
+- the browser session needs a refresh
 
 ### Chromium launch errors
 
-If Chromium refuses to start, check the image and container flags first.
-
-Typical causes:
+If Chromium refuses to start, check:
 
 - missing shared libraries
 - sandbox restrictions
-- incorrect executable path
+- wrong executable path
 - incomplete browser installation
 
 ## Design goals
 
-The project is intentionally kept small and readable.
+The project is built to stay small and readable.
 
-The goal is not to hide everything behind magic.
+The goal is not to hide the logic behind abstractions that make debugging harder.
 
-The goal is to make each layer obvious:
+The goal is to keep each layer obvious:
 
-- request validation
+- validation
 - execution
 - browser automation
 - JSON response
 
-That makes the service easier to debug and easier to extend later.
+That makes the service easier to extend later without turning it into a mess.
 
 ## Future ideas
 
-Possible next steps if you expand the service:
+Possible next steps if you keep expanding it:
 
-- add caching for repeated requests
-- add rate limiting
-- add queue-based bulk scraping
-- store results in SQLite or Postgres
-- add a retry strategy for transient page failures
-- expose a profile endpoint
+- add caching for repeated timeline requests
+- add a job queue for heavy timeline scrapes
+- store output in SQLite or Postgres
 - add structured logs
+- add retries for transient browser failures
+- expose additional X endpoints
+- add rate limiting
 
 ## Final note
 
-This project is a small scraper service, not a platform.
+This project is a scraper service, not a platform.
 
 That is the point.
 
-It is meant to stay clean, containerized, and easy to plug into whatever you build next.
+It stays focused, containerized, and easy to plug into whatever you build next.
