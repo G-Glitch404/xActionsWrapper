@@ -13,6 +13,7 @@ services:
     environment:
       TZ: UTC
       XACTIONS_AUTH_TOKEN: ${XACTIONS_AUTH_TOKEN}
+      XACTIONS_SESSION_COOKIE: ${XACTIONS_AUTH_TOKEN}
     volumes:
       - xactions_data:/data
     healthcheck:

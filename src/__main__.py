@@ -9,7 +9,7 @@ load_dotenv()
 def main() -> None:
     """ start the api server """
     uvicorn.run(
-        "src.main:app",
+        "src.api:app",
         host=os.environ["HOST"],
         port=int(os.environ["PORT"]),
         reload=False,
