@@ -1,15 +1,17 @@
 # xActions Wrapper
 
-A FastAPI microservice for scraping X content through **xActions**, packaged to run inside Docker.
+A container-first FastAPI microservice for scraping X content through **xActions**.
 
-This project is built to keep scraping isolated, repeatable, and easy to plug into automation workflows without turning the host machine into a dependency mess. The service exposes a narrow HTTP API around browser-driven scraping, then returns structured JSON that can be consumed by other scripts, pipelines, or downstream analytics.
+This project keeps scraping isolated, repeatable, and easy to plug into automation workflows without turning the host machine into a dependency mess. The service exposes a narrow HTTP API around browser-driven scraping, then returns structured JSON that can be consumed by other scripts, pipelines, or downstream analytics.
 
 ## What this project does
 
-This app currently exposes two endpoints:
+This app currently exposes four HTTP endpoints:
 
-- scrape tweets from one account or multiple accounts, one by one
-- scrape any X timeline URL, including list timelines and other timeline-style pages
+- `GET /health`
+- `GET /ready`
+- `POST /v1/scrape/tweets`
+- `POST /v1/scrape/list-timeline`
 
 The project is intentionally focused. It is not a database, not a queue worker, and not a general analytics platform. It is a microservice whose job is to accept a request, validate it, launch the scraper, and return usable data.
 
@@ -61,156 +63,13 @@ The image defines the Python version, the dependencies, the browser stack, and t
 
 The project is split into a few small pieces so the code stays readable and maintainable:
 
-- `src/items.py` contains Pydantic models
+- `src/items.py` contains Pydantic request and response models
 - `src/api.py` contains the FastAPI routes
-- `src/main.py` contains the xActions execution helpers
+- `src/main.py` contains the shared xActions execution helpers
 - `src/xactions_runner.mjs` bridges Python to Node/xActions
 - `src/__main__.py` starts the API server
 
 That split keeps request validation, endpoint routing, and browser automation from getting tangled together.
-
-## API endpoints
-
-### `POST /v1/scrape/tweets`
-
-Scrape tweets from one account or multiple accounts.
-
-The request accepts a list of usernames and processes them one by one. This makes it easy to scrape a single account or batch several accounts in a single call.
-
-#### Request body
-
-```json
-{
-  "usernames": ["MustStopMurad", "elonmusk"],
-  "limit": 10,
-  "timeout_seconds": 120
-}
-```
-
-#### Fields
-
-| Field             | Type      | Description                                |
-|-------------------|-----------|--------------------------------------------|
-| `usernames`       | list[str] | X usernames to scrape                      |
-| `limit`           | int       | Number of tweets to fetch for each account |
-| `timeout_seconds` | int       | Maximum time allowed for each scrape       |
-
-#### Response shape
-
-```json
-{
-  "usernames": ["MustStopMurad", "elonmusk"],
-  "limit": 10,
-  "count": 2,
-  "elapsed_ms": 18420,
-  "results": [
-    {
-      "username": "MustStopMurad",
-      "count": 10,
-      "tweets": []
-    },
-    {
-      "username": "elonmusk",
-      "count": 10,
-      "tweets": []
-    }
-  ]
-}
-```
-
-### `POST /v1/scrape/list-timeline`
-
-Scrape tweets from any timeline URL.
-
-This endpoint is meant for timeline-style pages, including X list timelines and similar timeline views that can be reached from a URL.
-
-#### Request body
-
-```json
-{
-  "list_url": "https://x.com/i/lists/1234567890",
-  "limit": 100,
-  "timeout_seconds": 120
-}
-```
-
-#### Fields
-
-| Field             | Type | Description                                 |
-|-------------------|------|---------------------------------------------|
-| `list_url`        | str  | Full timeline URL                           |
-| `limit`           | int  | Maximum number of timeline items to collect |
-| `timeout_seconds` | int  | Maximum time allowed for the scrape         |
-
-#### Response shape
-
-```json
-{
-  "list_url": "https://x.com/i/lists/1234567890",
-  "limit": 100,
-  "count": 100,
-  "elapsed_ms": 31204,
-  "tweets": []
-}
-```
-
-## What the timeline endpoint does
-
-This endpoint treats the target as a live timeline page. That means the service loads the URL, scrolls through the visible content, and extracts tweet objects from the page.
-
-It is not the same thing as scraping list members.
-
-If the URL points to a list timeline, it returns the tweets shown in that timeline. If the URL points to another timeline-style page, the scraper treats it the same way as long as the page structure is compatible.
-
-## Extracted tweet data
-
-The scraper now returns richer tweet objects than the old version.
-
-A typical extracted item can include:
-
-```json
-{
-  "tweet_id": "1940123456789012345",
-  "tweet_url": "https://x.com/user/status/1940123456789012345",
-  "account_name": "Memecoin Daddy",
-  "username": "Raghavak0nSol",
-  "verified": true,
-  "text": "3x $VOLE ...",
-  "time": "2026-08-02T09:10:17.000Z",
-  "hashtags": ["SOL", "VOLE"],
-  "has_media": true,
-  "has_photo": true,
-  "has_video": false,
-  "replies": 79,
-  "reposts": 1119,
-  "likes": 18594,
-  "bookmarks": 1337,
-  "views": 645918
-}
-```
-
-### Fields returned by the scraper
-
-| Field          | Meaning                                                  |
-|----------------|----------------------------------------------------------|
-| `tweet_id`     | Stable tweet identifier extracted from the status URL    |
-| `tweet_url`    | Permanent link to the tweet                              |
-| `account_name` | Clean display name from the author line                  |
-| `username`     | X handle without the `@`                                 |
-| `verified`     | Whether the account appears verified                     |
-| `text`         | Tweet body text                                          |
-| `time`         | Tweet timestamp in ISO format                            |
-| `hashtags`     | Hashtags extracted from the tweet text and hashtag links |
-| `has_media`    | True if the tweet contains media                         |
-| `has_photo`    | True if the tweet contains a photo                       |
-| `has_video`    | True if the tweet contains a video                       |
-| `replies`      | Reply count                                              |
-| `reposts`      | Repost count                                             |
-| `likes`        | Like count                                               |
-| `bookmarks`    | Bookmark count                                           |
-| `views`        | View count                                               |
-
-This is the data shape that makes the service useful for ranking, scoring, filtering, and downstream analysis.
 
 ## Request flow
 
@@ -222,52 +81,297 @@ The runtime flow is intentionally simple:
 4. the runner starts xActions
 5. Chromium loads the page
 6. the scraper extracts data from the DOM
-7. the runner returns JSON
-8. Python returns the response to the client
+7. xActions returns JSON
+8. Python enriches the tweet data
+9. Python returns the response to the client
 
 This keeps the scraping logic hidden behind a clean HTTP boundary.
 
-## Project layout
+## API endpoints
 
-```text
-xActionsWrapper/
-├── src/
-│   ├── __init__.py
-│   ├── __main__.py
-│   ├── api.py
-│   ├── items.py
-│   ├── main.py
-│   └── xactions_runner.mjs
-├── Dockerfile
-├── docker-compose.yml
-├── pyproject.toml
-├── uv.lock
-├── README.md
-└── .env
+### `GET /health`
+
+A lightweight liveness check.
+
+#### Request
+
+No request body.
+
+#### Response
+
+```json
+{
+  "status": "ok"
+}
 ```
 
-## Requirements
+#### Curl
 
-You need:
+```bash
+curl http://localhost:9096/health
+```
 
-- Docker
-- Docker Compose
-- an X auth cookie if the target page requires authentication
+---
 
-You do not need to install Python, Node.js, Chromium, or xActions on the host machine.
+### `GET /ready`
+
+A lightweight readiness check.
+
+#### Request
+
+No request body.
+
+#### Response
+
+```json
+{
+  "status": "ready"
+}
+```
+
+#### Curl
+
+```bash
+curl http://localhost:9096/ready
+```
+
+---
+
+### `POST /v1/scrape/tweets`
+
+Scrape tweets from one X account.
+
+The request accepts a single username and processes that account through the shared scraping core.
+
+#### Request body
+
+```json
+{
+  "username": "elonmusk",
+  "limit": 10,
+  "timeout_seconds": 120,
+  "stop_date": "2026-02-03"
+}
+```
+
+#### Fields
+
+| Field             | Type | Description                                      |
+|-------------------|------|--------------------------------------------------|
+| `username`        | str  | X username to scrape                             |
+| `limit`           | int  | Maximum number of tweets to fetch                |
+| `timeout_seconds` | int  | Maximum time allowed for the scrape              |
+| `stop_date`       | date | Optional cutoff date in `YYYY-MM-DD` format      |
+| `auth_token`      | str  | Optional X auth cookie passed into the container |
+
+The username is normalized by stripping a leading `@` and validating the remaining handle against the expected X username pattern.
+
+#### Response shape
+
+```json
+{
+  "username": "elonmusk",
+  "limit": 10,
+  "count": 10,
+  "elapsed_ms": 18420,
+  "tweets": [
+    {
+      "tweet_id": "1940123456789012345",
+      "tweet_url": "https://x.com/user/status/1940123456789012345",
+      "account_name": "Memecoin Daddy",
+      "username": "Raghavak0nSol",
+      "verified": true,
+      "body": "3x $VOLE ...",
+      "time": "2026-08-02T09:10:17.000Z",
+      "hashtags": [
+        "SOL",
+        "VOLE"
+      ],
+      "has_media": true,
+      "has_photo": true,
+      "has_video": false,
+      "replies": 79,
+      "reposts": 1119,
+      "likes": 18594,
+      "bookmarks": 1337,
+      "views": 645918,
+      "words_count": 4,
+      "sentiment_score": 0.8123,
+      "sentiment": "positive"
+    }
+  ]
+}
+```
+
+#### Curl
+
+```bash
+curl -X POST http://localhost:9096/v1/scrape/tweets   -H "Content-Type: application/json"   -d '{
+    "username": "elonmusk",
+    "limit": 10,
+    "timeout_seconds": 120,
+    "stop_date": "2026-02-03"
+  }'
+```
+
+---
+
+### `POST /v1/scrape/list-timeline`
+
+Scrape tweets from any timeline URL.
+
+This endpoint is meant for timeline-style pages, including X list timelines and similar timeline views that can be reached from a URL.
+
+#### Request body
+
+```json
+{
+  "url": "https://x.com/i/lists/1234567890",
+  "limit": 100,
+  "timeout_seconds": 120,
+  "stop_date": "2026-02-03"
+}
+```
+
+#### Fields
+
+| Field             | Type | Description                                      |
+|-------------------|------|--------------------------------------------------|
+| `url`             | str  | Full timeline URL                                |
+| `limit`           | int  | Maximum number of timeline items to collect      |
+| `timeout_seconds` | int  | Maximum time allowed for the scrape              |
+| `stop_date`       | date | Optional cutoff date in `YYYY-MM-DD` format      |
+| `auth_token`      | str  | Optional X auth cookie passed into the container |
+
+#### Response shape
+
+```json
+{
+  "url": "https://x.com/i/lists/1234567890",
+  "limit": 100,
+  "count": 100,
+  "elapsed_ms": 31204,
+  "tweets": [
+    {
+      "tweet_id": "1940123456789012345",
+      "tweet_url": "https://x.com/user/status/1940123456789012345",
+      "account_name": "Memecoin Daddy",
+      "username": "Raghavak0nSol",
+      "verified": true,
+      "body": "3x $VOLE ...",
+      "time": "2026-08-02T09:10:17.000Z",
+      "hashtags": [
+        "SOL",
+        "VOLE"
+      ],
+      "has_media": true,
+      "has_photo": true,
+      "has_video": false,
+      "replies": 79,
+      "reposts": 1119,
+      "likes": 18594,
+      "bookmarks": 1337,
+      "views": 645918,
+      "words_count": 4,
+      "sentiment_score": 0.8123,
+      "sentiment": "positive"
+    }
+  ]
+}
+```
+
+#### Curl
+
+```bash
+curl -X POST http://localhost:9096/v1/scrape/list-timeline   -H "Content-Type: application/json"   -d '{
+    "url": "https://x.com/i/lists/1234567890",
+    "limit": 100,
+    "timeout_seconds": 120,
+    "stop_date": "2026-02-03"
+  }'
+```
+
+## stop_date
+
+`stop_date` accepts `YYYY-MM-DD`.
+
+The value is validated in Python and normalized before being passed to the Node runner. Inside the browser scraper, tweets are processed from newest to oldest, so the crawl can stop as soon as it reaches tweets older than the cutoff. This avoids unnecessary scrolling and reduces browser work.
+
+That makes `stop_date` useful for:
+
+- faster timeline scraping
+- shorter runs
+- less DOM processing
+- lower response latency
+- less wasted time on old content
+
+## Extracted tweet data
+
+The scraper returns richer tweet objects than the old version.
+
+A typical extracted item can include:
+
+- `tweet_id`
+- `tweet_url`
+- `account_name`
+- `username`
+- `verified`
+- `body`
+- `time`
+- `hashtags`
+- `has_media`
+- `has_photo`
+- `has_video`
+- `replies`
+- `reposts`
+- `likes`
+- `bookmarks`
+- `views`
+
+Python additionally enriches every tweet with:
+
+- `words_count`
+- `sentiment_score`
+- `sentiment`
+
+### Field meanings
+
+| Field             | Meaning                                                  |
+|-------------------|----------------------------------------------------------|
+| `tweet_id`        | Stable tweet identifier extracted from the status URL    |
+| `tweet_url`       | Permanent link to the tweet                              |
+| `account_name`    | Clean display name from the author line                  |
+| `username`        | X handle without the `@`                                 |
+| `verified`        | Whether the account appears verified                     |
+| `body`            | Tweet body text                                          |
+| `time`            | Tweet timestamp in ISO format                            |
+| `hashtags`        | Hashtags extracted from the tweet text and hashtag links |
+| `has_media`       | True if the tweet contains media                         |
+| `has_photo`       | True if the tweet contains a photo                       |
+| `has_video`       | True if the tweet contains a video                       |
+| `replies`         | Reply count                                              |
+| `reposts`         | Repost count                                             |
+| `likes`           | Like count                                               |
+| `bookmarks`       | Bookmark count                                           |
+| `views`           | View count                                               |
+| `words_count`     | Count of words longer than 3 characters                  |
+| `sentiment_score` | VADER compound sentiment score                           |
+| `sentiment`       | Simple label derived from sentiment score                |
+
+This is the data shape that makes the service useful for ranking, scoring, filtering, and downstream analysis.
 
 ## Environment variables
 
 The container uses these values:
 
-| Variable                  | Purpose                                                           |
-|---------------------------|-------------------------------------------------------------------|
-| `XACTIONS_AUTH_TOKEN`     | X auth cookie passed into the container                           |
-| `XACTIONS_SESSION_COOKIE` | Optional alias for the same value                                 |
-| `MAX_CONCURRENT_SCRAPES`  | Limits how many scrape jobs can run at once                       |
-| `DEFAULT_TIMEOUT_SECONDS` | Default timeout for scrape requests                               |
-| `HOST`                    | host to connect to defualts to '0.0.0.0'                          |
-| `PORT`                    | port to connect to over docker compose contianer defualts to 9096 |
+| Variable                  | Purpose                                     |
+|---------------------------|---------------------------------------------|
+| `XACTIONS_AUTH_TOKEN`     | X auth cookie passed into the container     |
+| `XACTIONS_SESSION_COOKIE` | Optional alias for the same value           |
+| `MAX_CONCURRENT_SCRAPES`  | Limits how many scrape jobs can run at once |
+| `DEFAULT_TIMEOUT_SECONDS` | Default timeout for scrape requests         |
+| `HOST`                    | Host to bind to                             |
+| `PORT`                    | Port to listen on, defaults to `9096`       |
 
 ## Docker setup
 
@@ -299,6 +403,18 @@ Expected response:
 
 ```json
 {"status":"ok"}
+```
+
+### 4. Verify the readiness endpoint
+
+```bash
+curl http://localhost:9096/ready
+```
+
+Expected response:
+
+```json
+{"status":"ready"}
 ```
 
 ## Running locally with `uv`
@@ -338,48 +454,6 @@ That makes it a microservice in the practical sense:
 
 That design is useful when you want scraping as a building block instead of a giant application.
 
-## Curl tests
-
-### Test 1: scrape tweets from accounts
-
-```bash
-curl -X POST http://localhost:9096/v1/scrape/tweets \
-  -H "Content-Type: application/json" \
-  -d '{
-    "usernames": ["MustStopMurad", "elonmusk"],
-    "limit": 10,
-    "timeout_seconds": 120
-  }'
-```
-
-### Test 2: scrape a timeline URL
-
-```bash
-curl -X POST http://localhost:9096/v1/scrape/list-timeline \
-  -H "Content-Type: application/json" \
-  -d '{
-    "list_url": "https://x.com/i/lists/1234567890",
-    "limit": 100,
-    "timeout_seconds": 120
-  }'
-```
-
-## What to expect when a scrape fails
-
-A failed scrape does not always mean the code is broken.
-
-Common causes include:
-
-- the account is private
-- the auth cookie is missing or invalid
-- the target URL is wrong
-- X changed the page structure
-- the browser timed out
-- the page was rate-limited
-- the current session needs to be refreshed
-
-Scraping failures are often page issues, not API issues.
-
 ## Troubleshooting
 
 ### `ModuleNotFoundError: uvicorn`
@@ -417,6 +491,16 @@ If Chromium refuses to start, check:
 - wrong executable path
 - incomplete browser installation
 
+### Invalid `stop_date`
+
+`stop_date` must be a real calendar date in `YYYY-MM-DD` format.
+
+Examples:
+
+- `2026-02-03` is valid
+- `2026-02-30` is invalid
+- `2026-2-3` is invalid
+
 ## Design goals
 
 The project is built to stay small and readable.
@@ -429,6 +513,7 @@ The goal is to keep each layer obvious:
 - execution
 - browser automation
 - JSON response
+- enrichment
 
 That makes the service easier to extend later without turning it into a mess.
 
@@ -438,11 +523,11 @@ Possible next steps if you keep expanding it:
 
 - add caching for repeated timeline requests
 - add a job queue for heavy timeline scrapes
-- store output in SQLite or Postgres
 - add structured logs
 - add retries for transient browser failures
 - expose additional X endpoints
 - add rate limiting
+- add metrics and health probes for orchestration
 
 ## Final note
 
