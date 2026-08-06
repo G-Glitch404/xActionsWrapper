@@ -3,6 +3,12 @@ import { createBrowser, createPage, loginWithCookie, scrapeTweets } from "xactio
 const mode = process.argv[2]
 const target = process.argv[3]
 const limit = Number(process.argv[4] || "10")
+const stopDateRaw = process.argv[5] || process.env.XACTIONS_STOP_DATE || ""
+const stopDate = stopDateRaw ? new Date(`${stopDateRaw}T00:00:00Z`) : null
+
+if (stopDate && Number.isNaN(stopDate.getTime())) {
+  throw new Error("invalid stop_date")
+}
 
 if (!mode) {
   throw new Error("missing mode")
@@ -58,7 +64,7 @@ try {
   } else if (mode === "scrape_timeline" || mode === "list_timeline") {
     await page.goto(target, { waitUntil: "networkidle2" })
 
-    items = await page.evaluate(async (wantedLimit) => {
+    items = await page.evaluate(async (wantedLimit, stopDate) => {
       const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
       const parseCount = (value) => {
@@ -220,7 +226,7 @@ try {
       }
 
       const extractTweet = (tweet) => {
-        const text = cleanText(tweet.querySelector('[data-testid="tweetText"]')?.innerText || tweet.querySelector('[data-testid="tweetText"]')?.textContent || "")
+        const body = cleanText(tweet.querySelector('[data-testid="tweetText"]')?.innerText || tweet.querySelector('[data-testid="tweetText"]')?.textContent || "")
         const time = tweet.querySelector("time")?.getAttribute("datetime") || ""
         const { account_name, username } = extractUserInfo(tweet)
         const verified = extractVerified(tweet)
@@ -236,7 +242,7 @@ try {
           account_name,
           username,
           verified,
-          text,
+          body,
           time,
           hashtags,
           ...media,
@@ -245,28 +251,35 @@ try {
       }
 
       const seen = new Set()
-      const results = []
       let stableRounds = 0
+      let reachedStopDate = false
+      const emit = (item) => process.stdout.write(JSON.stringify(item) + "\n")
 
       const collect = () => {
         const tweetNodes = document.querySelectorAll('article[data-testid="tweet"]')
-
         for (const tweet of tweetNodes) {
           const item = extractTweet(tweet)
-          const key = item.tweet_id || `${item.username}|${item.time}|${item.text}`
-
-          if (item.text && !seen.has(key)) {
-            seen.add(key)
-            results.push(item)
+          if (!item.tweet_id) continue
+          if (seen.has(item.tweet_id)) continue
+          if (!item.body) continue
+          if (stopDate && item.time) {
+            const tweetTime = new Date(item.time)
+            if (!Number.isNaN(tweetTime.getTime()) && tweetTime < stopDate) {
+              reachedStopDate = true
+              break
+            }
           }
+
+          seen.add(item.tweet_id)
+          emit(item)
         }
       }
 
       collect()
 
-      while (results.length < wantedLimit && stableRounds < 4) {
+      while (results.length < wantedLimit && stableRounds < 4 && !reachedStopDate) {
         window.scrollTo(0, document.body.scrollHeight)
-        await sleep(2000)
+        await sleep(1500)
 
         const before = results.length
         collect()
@@ -279,7 +292,7 @@ try {
       }
 
       return results.slice(0, wantedLimit)
-    }, limit)
+    }, limit, stopDate)
   } else {
     throw new Error(`unsupported mode: ${mode}`)
   }

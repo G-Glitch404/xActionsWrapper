@@ -7,4 +7,5 @@ dependencies = [
     "fastapi >= 0.141.1",
     "python-dotenv>=1.2.2",
     "uvicorn>=0.52.1",
+    "vadersentiment>=3.3.2",
 ]
