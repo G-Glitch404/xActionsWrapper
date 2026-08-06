@@ -15,6 +15,15 @@ _sentiment_analyzer = SentimentIntensityAnalyzer()
 
 
 def _enrich_tweet(tweet: dict[str, Any]) -> dict[str, Any]:
+    """
+     enrich a raw tweet dictionary with derived fields used by the pipeline
+
+     Args:
+         tweet: raw tweet data returned by xactions
+
+     returns:
+         the same tweet dictionary with derived sentiment and word-count fields added
+    """
     text: str = str(tweet.get("text") or tweet.get("body") or "")
     words_count: int = sum(1 for word in text.split() if len(word) > 3)
     sentiment_score: float = _sentiment_analyzer.polarity_scores(text)["compound"]
@@ -30,6 +39,18 @@ def _enrich_tweet(tweet: dict[str, Any]) -> dict[str, Any]:
 
 
 def _parse_output(raw: bytes) -> Generator[dict[str, Any]]:
+    """
+     parse stdout output from the xactions runner into enriched tweet dictionaries
+
+     Args:
+         raw: raw stdout bytes emitted by the node runner
+
+     yields:
+         each valid tweet dictionary after enrichment
+
+     raises:
+         HTTPException: if the output is invalid or cannot be decoded as a json list
+    """
     text: str = raw.decode("utf-8", errors="replace").strip()
     try: data: Any = json.loads(text) if text else []
     except json.JSONDecodeError as exc: raise HTTPException(status_code=502, detail="invalid response") from exc
@@ -50,7 +71,23 @@ async def _run_xactions(
     auth_token: Optional[str] = None,
     timeout_seconds: int = 120,
 ) -> AsyncGenerator[dict[str, Any], None]:
-    """  """
+    """
+     run the xactions node scraper and stream parsed tweet dictionaries
+
+     Args:
+         mode: scraper mode passed to the node runner
+         target: username or timeline url depending on mode
+         limit: maximum number of tweets to collect
+         stop_date: optional cutoff date in yyyy-mm-dd format
+         auth_token: optional x auth cookie passed into the subprocess environment
+         timeout_seconds: maximum number of seconds to wait for output before timing out
+
+     yields:
+         enriched tweet dictionaries streamed from stdout
+
+     raises:
+         HTTPException: if the input is invalid, the subprocess times out, or the runner fails
+    """
     if stop_date and not isinstance(stop_date, str):
         raise HTTPException(
             status_code=422,
@@ -104,15 +141,32 @@ async def run_xactions(
     mode: Literal["tweets", "scrape_timeline"],
     target: str,
     limit: int,
-    stop_date: dt.datetime,
+    stop_date: dt.date,
     timeout_seconds: int,
     auth_token: Optional[str],
 ) -> AsyncGenerator[dict[str, Any], None]:
+    """
+     public wrapper around the xactions runner with normalized date handling
+
+     Args:
+         mode: supported scraper mode, such as tweets or scrape_timeline
+         target: username or timeline url depending on mode
+         limit: maximum number of tweets to collect
+         stop_date: cutoff date; tweets older than this date are ignored
+         timeout_seconds: maximum number of seconds to wait for output before timing out
+         auth_token: optional x auth cookie passed into the subprocess environment
+
+     yields:
+         enriched tweet dictionaries streamed from the internal runner
+
+     raises:
+         HTTPException: if stop_date is invalid or the underlying scraper fails
+    """
     async for tweet in _run_xactions(
         mode=mode,
         target=target,
         limit=limit,
-        stop_date=stop_date.date().strftime("YYYY-MM-DD"),
+        stop_date=stop_date.strftime("YYYY-MM-DD"),
         auth_token=auth_token,
         timeout_seconds=timeout_seconds,
     ):
