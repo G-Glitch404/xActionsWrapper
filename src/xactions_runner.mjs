@@ -54,21 +54,25 @@ function parseCount(value) {
 
 try {
   const page = await createPage(browser)
-
   if (authToken) {
     await loginWithCookie(page, authToken)
   }
 
-  let items = []
+  await page.exposeFunction("__emitTweet", (item) => {
+    process.stdout.write(JSON.stringify(item) + "\n")
+  })
 
   if (mode === "tweets") {
-    items = await scrapeTweets(page, target, { limit })
-  } else if (mode === "scrape_timeline" || mode === "list_timeline") {
+    let items = await scrapeTweets(page, target, { limit })
+    for (const tweet of items)
+      process.stdout.write(JSON.stringify(tweet) + "\n")
+  }
+
+  else if (mode === "scrape_timeline" || mode === "list_timeline") {
     await page.goto(target, { waitUntil: "networkidle2" })
-
-    items = await page.evaluate(async (wantedLimit, stopDate) => {
+    await page.evaluate(async (wantedLimit, stopDateArg) => {
+      const stopDate = stopDateArg ? new Date(stopDateArg) : null
       const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
-
       const parseCount = (value) => {
         const text = String(value || "").trim().replace(/,/g, "")
         if (!text || text === "0") {
@@ -253,13 +257,15 @@ try {
       }
 
       const seen = new Set()
+      let emittedCount = 0
       let stableRounds = 0
       let reachedStopDate = false
-      const emit = (item) => process.stdout.write(JSON.stringify(item) + "\n")
 
-      const collect = () => {
+      const collect = async () => {
         const tweetNodes = document.querySelectorAll('article[data-testid="tweet"]')
         for (const tweet of tweetNodes) {
+          if (emittedCount >= wantedLimit) break
+
           const item = extractTweet(tweet)
           if (!item.tweet_id) continue
           if (seen.has(item.tweet_id)) continue
@@ -273,33 +279,31 @@ try {
           }
 
           seen.add(item.tweet_id)
-          emit(item)
+          await window.__emitTweet(item)
+          emittedCount += 1
         }
       }
 
-      collect()
+      await collect()
 
-      while (results.length < wantedLimit && stableRounds < 4 && !reachedStopDate) {
+      while (emittedCount < wantedLimit && stableRounds < 4 && !reachedStopDate) {
         window.scrollTo(0, document.body.scrollHeight)
         await sleep(1500)
 
-        const before = results.length
-        collect()
+        const before = emittedCount
+        await collect()
 
-        if (results.length === before) {
+        if (emittedCount === before) {
           stableRounds += 1
         } else {
           stableRounds = 0
         }
       }
-
-      return results.slice(0, wantedLimit)
-    }, limit, stopDate)
+    }, limit, stopDate ? stopDate.toISOString() : null)
   } else {
     throw new Error(`unsupported mode: ${mode}`)
   }
 
-  process.stdout.write(JSON.stringify(items))
-} finally {
+  } finally {
   await browser.close()
 }

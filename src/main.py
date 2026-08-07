@@ -52,15 +52,13 @@ def _parse_output(raw: bytes) -> Generator[dict[str, Any], None, None]:
          HTTPException: if the output is invalid or cannot be decoded as a json list
     """
     text: str = raw.decode("utf-8", errors="replace").strip()
-    try: data: Any = json.loads(text) if text else []
+    try: tweet: dict[str, Any] = json.loads(text) if text else None
     except json.JSONDecodeError as exc: raise HTTPException(status_code=502, detail="invalid response") from exc
 
-    if not isinstance(data, list):
-        raise HTTPException(status_code=502, detail="invalid response")
+    if not isinstance(tweet, dict):
+        raise HTTPException(status_code=502, detail=f"invalid response expected dict got: '{tweet}'  -  text: '{text}'")
 
-    for tweet in data:
-        if not isinstance(tweet, dict): continue
-        yield _enrich_tweet(tweet)
+    yield _enrich_tweet(tweet)
 
 
 async def _run_xactions(
@@ -122,7 +120,7 @@ async def _run_xactions(
 
             if not line: break
             for tweet in _parse_output(line):
-                yield _enrich_tweet(tweet)
+                yield tweet
     except asyncio.TimeoutError as exc:
         proc.kill()
         await proc.wait()
