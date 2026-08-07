@@ -6,14 +6,14 @@ This project keeps scraping isolated, repeatable, and easy to plug into automati
 
 ## What this project does
 
-This app currently exposes four HTTP endpoints and 2 Websockets:
+This app currently exposes 4 HTTP endpoints and 2 Websockets:
 
 - `GET /health`
 - `GET /ready`
 - `POST /v1/scrape/tweets`
 - `POST /v1/scrape/timeline`
 - `WS /v1/ws/tweets`
-- `WS /v1/ws/list-timeline`
+- `WS /v1/ws/scrape-timeline`
 
 The project is intentionally focused. It is not a database, not a queue worker, and not a general analytics platform. It is a microservice whose job is to accept a request, validate it, launch the scraper, and return usable data.
 
@@ -176,6 +176,8 @@ The username is normalized by stripping a leading `@` and validating the remaini
 
 #### Response shape
 
+The tweets endpoint returns the account scrape output produced by the runner, enriched by Python.
+
 ```json
 {
   "username": "elonmusk",
@@ -184,32 +186,52 @@ The username is normalized by stripping a leading `@` and validating the remaini
   "elapsed_ms": 18420,
   "tweets": [
     {
-      "tweet_id": "1940123456789012345",
-      "tweet_url": "https://x.com/user/status/1940123456789012345",
-      "account_name": "Memecoin Daddy",
-      "username": "Raghavak0nSol",
-      "verified": true,
-      "body": "3x $VOLE ...",
-      "time": "2026-08-02T09:10:17.000Z",
-      "hashtags": [
-        "SOL",
-        "VOLE"
-      ],
-      "has_media": true,
-      "has_photo": true,
-      "has_video": false,
-      "replies": 79,
-      "reposts": 1119,
-      "likes": 18594,
-      "bookmarks": 1337,
-      "views": 645918,
-      "words_count": 4,
-      "sentiment_score": 0.8123,
+      "id": "2085377974396752305",
+      "text": "Terafab Texas will be the largest and most valuable building on Earth by far.\n\nAnd it will be stunningly beautiful.",
+      "timestamp": "2026-08-06T14:50:28.000Z",
+      "likes": "74K",
+      "retweets": "9.4K",
+      "replies": "5.5K",
+      "views": "10M",
+      "url": "https://x.com/elonmusk/status/2085377974396752305",
+      "media": {
+        "images": [
+          "https://pbs.twimg.com/amplify_video_thumb/2085361439267491840/img/hKoDHwGl-6I7_m6o.jpg"
+        ],
+        "hasVideo": true
+      },
+      "isQuote": false,
+      "isRetweet": true,
+      "platform": "twitter",
+      "words_count": 12,
+      "sentiment_score": 0.807,
       "sentiment": "positive"
     }
   ]
 }
 ```
+
+#### Fields
+
+This endpoint returns the raw X account scrape shape, plus the enrichment fields added by Python.
+
+| Field             | Meaning                                   |
+|-------------------|-------------------------------------------|
+| `id`              | Stable tweet identifier extracted from X  |
+| `text`            | Tweet text                                |
+| `timestamp`       | Tweet timestamp in ISO format             |
+| `likes`           | Like count as returned by the runner      |
+| `retweets`        | Retweet count as returned by the runner   |
+| `replies`         | Reply count as returned by the runner     |
+| `views`           | View count as returned by the runner      |
+| `url`             | Permanent link to the tweet               |
+| `media`           | Media metadata returned by the runner     |
+| `isQuote`         | Whether the item is a quote tweet         |
+| `isRetweet`       | Whether the item is a retweet             |
+| `platform`        | Source platform                           |
+| `words_count`     | Count of words longer than 3 characters   |
+| `sentiment_score` | VADER compound sentiment score            |
+| `sentiment`       | Simple label derived from sentiment score |
 
 #### Curl
 
@@ -330,30 +352,33 @@ This WebSocket endpoint accepts the same request shape as the tweets POST endpoi
 
 #### Streamed Messages
 
-The server sends one message per tweet:
+The WebSocket endpoint returns the same tweet shape as `POST /v1/scrape/tweets`, but sends each tweet as soon as it is available.
+
+Each item is streamed like this:
 
 ```json
 {
   "type": "item",
   "data": {
-    "tweet_id": "1940123456789012345",
-    "tweet_url": "https://x.com/user/status/1940123456789012345",
-    "account_name": "Memecoin Daddy",
-    "username": "Raghavak0nSol",
-    "verified": true,
-    "body": "3x $VOLE ...",
-    "time": "2026-08-02T09:10:17.000Z",
-    "hashtags": ["SOL", "VOLE"],
-    "has_media": true,
-    "has_photo": true,
-    "has_video": false,
-    "replies": 79,
-    "reposts": 1119,
-    "likes": 18594,
-    "bookmarks": 1337,
-    "views": 645918,
-    "words_count": 4,
-    "sentiment_score": 0.8123,
+    "id": "2085377974396752305",
+    "text": "Terafab Texas will be the largest and most valuable building on Earth by far.\n\nAnd it will be stunningly beautiful.",
+    "timestamp": "2026-08-06T14:50:28.000Z",
+    "likes": "74K",
+    "retweets": "9.4K",
+    "replies": "5.5K",
+    "views": "10M",
+    "url": "https://x.com/elonmusk/status/2085377974396752305",
+    "media": {
+      "images": [
+        "https://pbs.twimg.com/amplify_video_thumb/2085361439267491840/img/hKoDHwGl-6I7_m6o.jpg"
+      ],
+      "hasVideo": true
+    },
+    "isQuote": false,
+    "isRetweet": true,
+    "platform": "twitter",
+    "words_count": 12,
+    "sentiment_score": 0.807,
     "sentiment": "positive"
   }
 }
@@ -459,10 +484,24 @@ If an error occurs, the server sends:
 
 This endpoint is the streamed version of the timeline scraper. Use it when the target page is large and you want the data as soon as the browser finds it.
 
+## Output contracts
+
+The service currently returns two related but different tweet shapes:
+
+### Account scrape output
+Returned by `POST /v1/scrape/tweets` and its WebSocket counterpart.
+This output reflects the account scraping pipeline and includes the raw X-style fields used by the runner, plus Python enrichment fields.
+
+### Timeline scrape output
+Returned by `POST /v1/scrape/timeline` and its WebSocket counterpart.
+This output is the normalized timeline shape used by the downstream pipeline.
+
 ## stop_date
 
-`stop_date` accepts `YYYY-MM-DD`.
-`stopDateArg` in the JavaScript script accepts iso format.
+it accepts YYYY-MM-DD
+it is normalized in Python
+it is applied during scrolling in the browser
+it stops once older tweets are reached
 
 The value is validated in Python and normalized before being passed to the Node runner. Inside the browser scraper, tweets are processed from newest to oldest, so the crawl can stop as soon as it reaches tweets older than the cutoff. This avoids unnecessary scrolling and reduces browser work.
 
@@ -714,15 +753,35 @@ That makes the service easier to extend later without turning it into a mess.
 
 ## Future ideas
 
-Possible next steps if you keep expanding it:
+The next work should focus on making the scraper more consistent, more resilient, and more useful downstream.
 
-- add caching for repeated timeline requests
-- add a job queue for heavy timeline scrapes
-- add structured logs
-- add retries for transient browser failures
-- expose additional X endpoints
-- add rate limiting
-- add metrics and health probes for orchestration
+Possible next steps:
+
+- normalize the output contract across REST and WebSocket endpoints so each route is documented exactly as it behaves
+- expand tweet extraction with more structured fields, especially:
+  - mentions
+  - cashtags
+  - URLs
+  - quote tweet metadata
+  - retweet metadata
+  - reply metadata
+  - author profile details
+  - media details
+  - edit markers when available
+- improve scraping reliability when X changes its DOM structure
+- add stronger fallback logic for account pages, list timelines, and partial page loads
+- improve handling for login walls, soft blocks, and rate-limited pages
+- add cursor-based continuation so long scrapes can resume cleanly
+- add caching and deduplication for repeated timeline requests
+- add request tracing so every scrape can be debugged from start to finish
+- add structured logs and metrics for scrape quality, timing, failures, and empty results
+- add retries with backoff for transient browser and network failures
+- add contract tests that verify the response schema for every endpoint
+- add more endpoint coverage for other X timeline patterns when needed
+- add optional export targets for downstream pipelines and analytics jobs
+- support richer enrichment later, such as better sentiment, author scoring, and narrative detection
+
+The overall goal is to keep the service small, but make the scraping output more complete and more reliable each time it is extended.
 
 ## Final note
 
