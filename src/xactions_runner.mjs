@@ -3,11 +3,13 @@ import { createBrowser, createPage, loginWithCookie, scrapeTweets } from "xactio
 const mode = process.argv[2]
 const target = process.argv[3]
 const limit = Number(process.argv[4] || "10")
-const stopDateRaw = process.argv[5] || process.env.XACTIONS_STOP_DATE || ""
-const stopDate = stopDateRaw ? new Date(`${stopDateRaw}T00:00:00Z`) : null
+const stopDateArg = process.argv[5] ?? ""
 
-if (stopDate && Number.isNaN(stopDate.getTime())) {
-  throw new Error("invalid stop_date")
+let stopDate = null
+if (stopDateArg.length > 0) {
+    stopDate = new Date(stopDateArg)
+    if (Number.isNaN(stopDate.getTime()))
+        throw new Error("invalid stop_date")
 }
 
 if (!mode) {

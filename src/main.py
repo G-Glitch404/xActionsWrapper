@@ -38,7 +38,7 @@ def _enrich_tweet(tweet: dict[str, Any]) -> dict[str, Any]:
     return tweet
 
 
-def _parse_output(raw: bytes) -> Generator[dict[str, Any]]:
+def _parse_output(raw: bytes) -> Generator[dict[str, Any], None, None]:
     """
      parse stdout output from the xactions runner into enriched tweet dictionaries
 
@@ -166,7 +166,7 @@ async def run_xactions(
         mode=mode,
         target=target,
         limit=limit,
-        stop_date=stop_date.strftime("YYYY-MM-DD"),
+        stop_date=stop_date.strftime("%Y-%m-%d"),
         auth_token=auth_token,
         timeout_seconds=timeout_seconds,
     ):

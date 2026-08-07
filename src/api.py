@@ -190,16 +190,16 @@ async def scrape_tweets(req: ScrapeRequest) -> ScrapeResponse:
     )
 
 
-@app.post("/v1/scrape/list-timeline", response_model=ListTimelineResponse)
-async def scrape_list_timeline(req: ListTimelineRequest) -> ListTimelineResponse:
+@app.post("/v1/scrape/timeline", response_model=ListTimelineResponse)
+async def scrape_timeline(req: ListTimelineRequest) -> ListTimelineResponse:
     """
     scrape tweets from a timeline url
 
     Args:
-        req: validated list timeline request containing the url, limit, timeout, auth token, and stop date
+        req: validated timeline request containing the url, limit, timeout, auth token, and stop date
 
     Returns:
-        a structured response containing the list url, tweet count, elapsed time, and collected tweets
+        a structured response containing the url, tweet count, elapsed time, and collected tweets
     """
     started = time.perf_counter()
 
@@ -255,7 +255,7 @@ async def ws_scrape_tweets(websocket: WebSocket) -> None:
         await websocket.send_json({"type": "error", "detail": str(exc)})
 
 
-@app.websocket("/v1/ws/list-timeline")
+@app.websocket("/v1/ws/scrape-timeline")
 async def ws_scrape_list_timeline(websocket: WebSocket) -> None:
     """
      stream tweets from a timeline url over websocket
