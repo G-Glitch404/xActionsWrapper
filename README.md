@@ -6,12 +6,14 @@ This project keeps scraping isolated, repeatable, and easy to plug into automati
 
 ## What this project does
 
-This app currently exposes four HTTP endpoints:
+This app currently exposes four HTTP endpoints and 2 Websockets:
 
 - `GET /health`
 - `GET /ready`
 - `POST /v1/scrape/tweets`
-- `POST /v1/scrape/list-timeline`
+- `POST /v1/scrape/timeline`
+- `WS /v1/ws/tweets`
+- `WS /v1/ws/list-timeline`
 
 The project is intentionally focused. It is not a database, not a queue worker, and not a general analytics platform. It is a microservice whose job is to accept a request, validate it, launch the scraper, and return usable data.
 
@@ -101,7 +103,9 @@ No request body.
 
 ```json
 {
-  "status": "ok"
+  "status":"healthy",
+  "service":"xactions",
+  "version":"1.0.0"
 }
 ```
 
@@ -125,7 +129,11 @@ No request body.
 
 ```json
 {
-  "status": "ready"
+  "status":"ready",
+  "node_ready":true,
+  "runner":true,
+  "available_slots":2,
+  "max_concurrent_scrapes":2
 }
 ```
 
@@ -216,7 +224,7 @@ curl -X POST http://localhost:9096/v1/scrape/tweets   -H "Content-Type: applicat
 
 ---
 
-### `POST /v1/scrape/list-timeline`
+### `POST /v1/scrape/timeline`
 
 Scrape tweets from any timeline URL.
 
@@ -283,7 +291,7 @@ This endpoint is meant for timeline-style pages, including X list timelines and 
 #### Curl
 
 ```bash
-curl -X POST http://localhost:9096/v1/scrape/list-timeline   -H "Content-Type: application/json"   -d '{
+curl -X POST http://localhost:9096/v1/scrape/timeline   -H "Content-Type: application/json"   -d '{
     "url": "https://x.com/i/lists/1234567890",
     "limit": 100,
     "timeout_seconds": 120,
@@ -291,9 +299,170 @@ curl -X POST http://localhost:9096/v1/scrape/list-timeline   -H "Content-Type: a
   }'
 ```
 
+---
+
+### `WS /v1/ws/tweets`
+
+Stream tweets from one X account.
+
+This WebSocket endpoint accepts the same request shape as the tweets POST endpoint, but returns items incrementally as they are scraped.
+
+#### Request body
+
+```json
+{
+  "username": "elonmusk",
+  "limit": 10,
+  "timeout_seconds": 120,
+  "stop_date": "2026-02-03"
+}
+```
+
+#### Fields
+
+| Field             | Type | Description                                      |
+|-------------------|------|--------------------------------------------------|
+| `username`        | str  | X username to scrape                             |
+| `limit`           | int  | Maximum number of tweets to fetch                |
+| `timeout_seconds` | int  | Maximum time allowed for the scrape              |
+| `stop_date`       | date | Optional cutoff date in `YYYY-MM-DD` format      |
+| `auth_token`      | str  | Optional X auth cookie passed into the container |
+
+#### Streamed Messages
+
+The server sends one message per tweet:
+
+```json
+{
+  "type": "item",
+  "data": {
+    "tweet_id": "1940123456789012345",
+    "tweet_url": "https://x.com/user/status/1940123456789012345",
+    "account_name": "Memecoin Daddy",
+    "username": "Raghavak0nSol",
+    "verified": true,
+    "body": "3x $VOLE ...",
+    "time": "2026-08-02T09:10:17.000Z",
+    "hashtags": ["SOL", "VOLE"],
+    "has_media": true,
+    "has_photo": true,
+    "has_video": false,
+    "replies": 79,
+    "reposts": 1119,
+    "likes": 18594,
+    "bookmarks": 1337,
+    "views": 645918,
+    "words_count": 4,
+    "sentiment_score": 0.8123,
+    "sentiment": "positive"
+  }
+}
+```
+
+When the scrape finishes, the server sends:
+
+```json
+{
+  "type": "done"
+}
+```
+
+If an error occurs, the server sends:
+
+```json
+{
+  "type": "error",
+  "detail": "..."
+}
+```
+
+#### Usage Note
+
+This endpoint is best when you want to process results as they arrive instead of waiting for the full scrape to finish.
+
+## `WS /v1/ws/scrape-timeline`
+
+Stream tweets from any timeline URL.
+
+This WebSocket endpoint works with timeline-style pages, including X list timelines and other timeline views that can be reached from a URL.
+
+### Request Body
+
+```json
+{
+  "url": "https://x.com/i/lists/1234567890",
+  "limit": 100,
+  "timeout_seconds": 120,
+  "stop_date": "2026-02-03"
+}
+```
+
+### Fields
+
+| Field             | Type   | Description                                      |
+|-------------------|--------|--------------------------------------------------|
+| `url`             | `str`  | Full timeline URL                                |
+| `limit`           | `int`  | Maximum number of timeline items to collect      |
+| `timeout_seconds` | `int`  | Maximum time allowed for the scrape              |
+| `stop_date`       | `date` | Optional cutoff date in `YYYY-MM-DD` format      |
+| `auth_token`      | `str`  | Optional X auth cookie passed into the container |
+
+### Streamed Messages
+
+The server sends one message per tweet:
+
+```json
+{
+  "type": "item",
+  "data": {
+    "tweet_id": "1940123456789012345",
+    "tweet_url": "https://x.com/user/status/1940123456789012345",
+    "account_name": "Memecoin Daddy",
+    "username": "Raghavak0nSol",
+    "verified": true,
+    "body": "3x $VOLE ...",
+    "time": "2026-08-02T09:10:17.000Z",
+    "hashtags": ["SOL", "VOLE"],
+    "has_media": true,
+    "has_photo": true,
+    "has_video": false,
+    "replies": 79,
+    "reposts": 1119,
+    "likes": 18594,
+    "bookmarks": 1337,
+    "views": 645918,
+    "words_count": 4,
+    "sentiment_score": 0.8123,
+    "sentiment": "positive"
+  }
+}
+```
+
+When the scrape finishes, the server sends:
+
+```json
+{
+  "type": "done"
+}
+```
+
+If an error occurs, the server sends:
+
+```json
+{
+  "type": "error",
+  "detail": "..."
+}
+```
+
+### Usage Note
+
+This endpoint is the streamed version of the timeline scraper. Use it when the target page is large and you want the data as soon as the browser finds it.
+
 ## stop_date
 
 `stop_date` accepts `YYYY-MM-DD`.
+`stopDateArg` in the JavaScript script accepts iso format.
 
 The value is validated in Python and normalized before being passed to the Node runner. Inside the browser scraper, tweets are processed from newest to oldest, so the crawl can stop as soon as it reaches tweets older than the cutoff. This avoids unnecessary scrolling and reduces browser work.
 
@@ -390,7 +559,11 @@ Do not hardcode the cookie into the image.
 ### 2. Build and start the service
 
 ```bash
-docker compose up --build
+docker compose up -d --build
+```
+or in case of having some trouble after some successful builds
+```bash
+docker compose build --no-cache
 ```
 
 ### 3. Verify the health endpoint
@@ -402,7 +575,11 @@ curl http://localhost:9096/health
 Expected response:
 
 ```json
-{"status":"ok"}
+{
+  "status":"healthy",
+  "service":"xactions",
+  "version":"1.0.0"
+}
 ```
 
 ### 4. Verify the readiness endpoint
@@ -414,7 +591,25 @@ curl http://localhost:9096/ready
 Expected response:
 
 ```json
-{"status":"ready"}
+{
+  "status":"ready",
+  "node_ready":true,
+  "runner":true,
+  "available_slots":2,
+  "max_concurrent_scrapes":2
+}
+```
+
+or if something is wrong
+
+```json
+{
+  "status":"not-ready",
+  "node_ready":true,
+  "runner":true,
+  "available_slots":0,
+  "max_concurrent_scrapes":2
+}
 ```
 
 ## Running locally with `uv`
