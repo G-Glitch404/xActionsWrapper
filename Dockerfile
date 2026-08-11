@@ -64,4 +64,4 @@ RUN mkdir -p /data/.xactions
 EXPOSE 9096
 
 ENTRYPOINT ["tini", "--"]
-CMD ["uv", "run", "python", "-m", "src"]
+CMD ["uv", "run", "uvicorn", "src.api:app", "--host", "0.0.0.0", "--port", "9096"]

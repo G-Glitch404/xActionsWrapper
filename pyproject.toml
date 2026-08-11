@@ -1,11 +1,11 @@
 [project]
 name = "xactionswrapper"
 version = "0.1.0"
-description = "Add your description here"
+description = "A containerized FastAPI microservice that provides structured X scraping through xActions"
 requires-python = ">=3.11"
 dependencies = [
     "fastapi >= 0.141.1",
     "python-dotenv>=1.2.2",
-    "uvicorn>=0.52.1",
+    "uvicorn[standard]>=0.52.1",
     "vadersentiment>=3.3.2",
 ]
