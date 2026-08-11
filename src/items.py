@@ -11,10 +11,10 @@ USERNAME_RE = re.compile(r"^[A-Za-z0-9_]{1,15}$")
 
 
 class ScrapeRequest(BaseModel):
-    username: str = Field(min_length=1, max_length=32)
-    limit: int = Field(default=10, ge=1, le=100)
+    username: str = Field(min_length=1, max_length=500)
+    limit: int = Field(default=10, ge=1, le=10_000)
     auth_token: Optional[str] = Field(default=None, min_length=1, max_length=512)
-    timeout_seconds: int = Field(default=DEFAULT_TIMEOUT_SECONDS, ge=10, le=600)
+    timeout_seconds: int = Field(default=DEFAULT_TIMEOUT_SECONDS, ge=10, le=601)
     stop_date: Optional[dt.date] = None
 
     @field_validator("username")
@@ -27,11 +27,11 @@ class ScrapeRequest(BaseModel):
         return value
 
 
-class ListTimelineRequest(BaseModel):
+class ScrapeTimelineRequest(BaseModel):
     url: str = Field(min_length=1, max_length=500)
-    limit: int = Field(default=100, ge=1, le=1000)
+    limit: int = Field(default=100, ge=1, le=10_000)
     auth_token: Optional[str] = Field(default=None, min_length=1, max_length=512)
-    timeout_seconds: int = Field(default=DEFAULT_TIMEOUT_SECONDS, ge=10, le=600)
+    timeout_seconds: int = Field(default=DEFAULT_TIMEOUT_SECONDS, ge=10, le=601)
     stop_date: Optional[dt.date] = None
 
     @field_validator("url")
@@ -52,7 +52,7 @@ class ScrapeResponse(BaseModel):
     tweets: list[dict[str, Any]]
 
 
-class ListTimelineResponse(BaseModel):
+class ScrapeTimelineResponse(BaseModel):
     url: str
     limit: int
     count: int

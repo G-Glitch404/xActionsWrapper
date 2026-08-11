@@ -11,8 +11,8 @@ from src.main import run_xactions, RUNNER
 from src.items import (
     ScrapeRequest,
     ScrapeResponse,
-    ListTimelineRequest,
-    ListTimelineResponse,
+    ScrapeTimelineRequest,
+    ScrapeTimelineResponse,
 )
 
 MAX_CONCURRENT_SCRAPES = int(os.getenv("MAX_CONCURRENT_SCRAPES", "2"))
@@ -190,8 +190,8 @@ async def scrape_tweets(req: ScrapeRequest) -> ScrapeResponse:
     )
 
 
-@app.post("/v1/scrape/timeline", response_model=ListTimelineResponse)
-async def scrape_timeline(req: ListTimelineRequest) -> ListTimelineResponse:
+@app.post("/v1/scrape/timeline", response_model=ScrapeTimelineResponse)
+async def scrape_timeline(req: ScrapeTimelineRequest) -> ScrapeTimelineResponse:
     """
     scrape tweets from a timeline url
 
@@ -216,7 +216,7 @@ async def scrape_timeline(req: ListTimelineRequest) -> ListTimelineResponse:
 
     elapsed_ms = int((time.perf_counter() - started) * 1000)
 
-    return ListTimelineResponse(
+    return ScrapeTimelineResponse(
         url=req.url,
         limit=req.limit,
         count=len(tweets),
@@ -267,7 +267,7 @@ async def ws_scrape_list_timeline(websocket: WebSocket) -> None:
 
     try:
         payload = await websocket.receive_json()
-        req = ListTimelineRequest(**payload)
+        req = ScrapeTimelineRequest(**payload)
 
         await _stream(
             websocket,
