@@ -1,9 +1,9 @@
 services:
   xactions-api:
-    container_name: xactions-api-app
+    container_name: x-crawler-app
     restart: unless-stopped
     stop_grace_period: 30s
-    image: localhost/xactions-api:latest
+    image: localhost/x-crawler:latest
     env_file: ./.env
     build:
       context: .
@@ -14,6 +14,11 @@ services:
       TZ: UTC
       XACTIONS_AUTH_TOKEN: ${XACTIONS_AUTH_TOKEN}
       XACTIONS_SESSION_COOKIE: ${XACTIONS_AUTH_TOKEN}
+    networks:
+      - crawlers-network
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
     volumes:
       - xactions_data:/data
     healthcheck:
@@ -25,3 +30,7 @@ services:
 
 volumes:
   xactions_data:
+
+networks:
+  crawlers-network:
+    external: true

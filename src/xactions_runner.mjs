@@ -54,6 +54,8 @@ function parseCount(value) {
 
 try {
   const page = await createPage(browser)
+  page.setDefaultTimeout(120000)
+  page.setDefaultNavigationTimeout(120000)
   if (authToken) {
     await loginWithCookie(page, authToken)
   }
