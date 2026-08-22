@@ -9,6 +9,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 
 from src.main import run_xactions, RUNNER
 from src.items import (
+    Tweet,
     ScrapeRequest,
     ScrapeResponse,
     ScrapeTimelineRequest,
@@ -66,7 +67,7 @@ def _normalize_stop_date(stop_date: Optional[Union[dt.date, dt.datetime, str]]) 
     )
 
 
-async def _stream(websocket: WebSocket, generator: AsyncGenerator[dict[str, Any], None]) -> None:
+async def _stream(websocket: WebSocket, generator: AsyncGenerator[Tweet, None]) -> None:
     """
      stream generator output to a websocket client
 
@@ -75,7 +76,10 @@ async def _stream(websocket: WebSocket, generator: AsyncGenerator[dict[str, Any]
          generator: async generator that yields tweet dictionaries
     """
     async for item in generator:
-        await websocket.send_json({"type": "item", "data": item})
+        await websocket.send_json({
+            "type": "item",
+            "data": item.model_dump_json(ensure_ascii=False, indent=2)
+        })
 
     await websocket.send_json({"type": "done"})
 
@@ -87,7 +91,7 @@ async def _scrape(
     stop_date: Optional[Union[dt.date, dt.datetime, str]],
     auth_token: Optional[str],
     timeout_seconds: int,
-) -> AsyncGenerator[dict[str, Any], None]:
+) -> AsyncGenerator[Tweet, None]:
     """
     run the xactions scraper through the shared concurrency gate
 
@@ -100,7 +104,7 @@ async def _scrape(
         timeout_seconds: maximum number of seconds to wait for output before timing out
 
     Yields:
-        enriched tweet dictionaries streamed from the xactions runner
+        enriched Tweet streamed from the xactions runner
 
     Raises:
         HTTPException: if the scrape fails inside the downstream runner
