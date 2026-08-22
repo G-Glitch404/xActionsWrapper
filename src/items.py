@@ -44,6 +44,36 @@ class ScrapeTimelineRequest(BaseModel):
         return value
 
 
+class Tweet(BaseModel):
+    tweet_id: str
+    tweet_url: str
+    content_hash: str
+    engagement_hash: str
+    account_name: str
+    username: str
+    body: str
+    time: str
+    sentiment: str
+    verified: bool
+    has_media: bool
+    has_photo: bool
+    has_video: bool
+    engagement_count: int
+    tweet_weight: int
+    replies_count: int
+    reposts: int
+    likes: int
+    bookmarks: int
+    views: int
+    words_count: int
+    words_length: int
+    tweet_length: int
+    sentiment_score: float
+    hashtags: list[str]
+    cashtags: list[str]
+    found_urls: list[str]
+
+
 class ScrapeResponse(BaseModel):
     username: str
     limit: int
