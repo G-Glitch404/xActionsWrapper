@@ -27,8 +27,10 @@ def _enrich_tweet(tweet: dict[str, Any]) -> dict[str, Any]:
     text: str = str(tweet.get("text") or tweet.get("body") or "")
     words_count: int = sum(1 for word in text.split() if len(word) > 3)
     sentiment_score: float = _sentiment_analyzer.polarity_scores(text)["compound"]
+    message_length: int = len(text)
 
     tweet["words_count"] = words_count
+    tweet["message_length"] = message_length
     tweet["sentiment_score"] = sentiment_score
 
     if sentiment_score > 0.1: tweet["sentiment"] = "positive"
