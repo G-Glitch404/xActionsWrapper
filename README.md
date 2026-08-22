@@ -966,8 +966,6 @@ Possible next steps:
 - normalize the output contract across REST and WebSocket endpoints so each route is documented exactly as it behaves
 - expand tweet extraction with more structured fields, especially:
   - mentions
-  - cashtags
-  - URLs
   - quote tweet metadata
   - retweet metadata
   - reply metadata
