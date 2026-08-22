@@ -72,22 +72,23 @@ The project is split into a few small pieces so the code stays readable and main
 - `src/__main__.py` starts the API server
 
 That split keeps request validation, endpoint routing, and browser automation from getting tangled together.
-
 ## Request flow
 
-The runtime flow is intentionally simple:
+The runtime flow is:
 
 1. FastAPI receives the request
 2. Pydantic validates the input
 3. Python launches the Node runner
-4. the runner starts xActions
-5. Chromium loads the page
-6. the scraper extracts data from the DOM
-7. xActions returns JSON
-8. Python enriches the tweet data
-9. Python returns the response to the client
-
-This keeps the scraping logic hidden behind a clean HTTP boundary.
+4. xActions performs the X scrape
+5. Chromium loads the target page when required
+6. The Node runner extracts raw tweet data
+7. Python parses and normalizes the output
+8. The raw tweet is converted into the `Tweet` model
+9. Engagement values are normalized
+10. Content hashes and engagement hashes are generated
+11. Text statistics and sentiment are calculated
+12. Hashtags, cashtags, and URLs are extracted
+13. The normalized tweet is returned or streamed to the client
 
 ## API endpoints
 
@@ -182,30 +183,37 @@ The tweets endpoint returns the account scrape output produced by the runner, en
 {
   "username": "elonmusk",
   "limit": 10,
-  "count": 10,
+  "count": 1,
   "elapsed_ms": 18420,
   "tweets": [
     {
-      "id": "2085377974396752305",
-      "text": "Terafab Texas will be the largest and most valuable building on Earth by far.\n\nAnd it will be stunningly beautiful.",
-      "timestamp": "2026-08-06T14:50:28.000Z",
-      "likes": "74K",
-      "retweets": "9.4K",
-      "replies": "5.5K",
-      "views": "10M",
-      "url": "https://x.com/elonmusk/status/2085377974396752305",
-      "media": {
-        "images": [
-          "https://pbs.twimg.com/amplify_video_thumb/2085361439267491840/img/hKoDHwGl-6I7_m6o.jpg"
-        ],
-        "hasVideo": true
-      },
-      "isQuote": false,
-      "isRetweet": true,
-      "platform": "twitter",
+      "tweet_id": "2085377974396752305",
+      "tweet_url": "https://x.com/elonmusk/status/2085377974396752305",
+      "content_hash": "6f0c2e0e5d4c6f2d8d8a9f0b2c2c6a18",
+      "engagement_hash": "4c4a4f2dd0c7fdc3bd7ad5e9a16f5d12",
+      "account_name": "Elon Musk",
+      "username": "elonmusk",
+      "body": "Terafab Texas will be the largest and most valuable building on Earth by far.",
+      "time": "2026-08-06T14:50:28.000Z",
+      "sentiment": "positive",
+      "verified": true,
+      "has_media": true,
+      "has_photo": false,
+      "has_video": true,
+      "engagement_count": 84874,
+      "tweet_weight": 5,
+      "replies_count": 5500,
+      "reposts": 9400,
+      "likes": 74000,
+      "bookmarks": 0,
+      "views": 10000000,
       "words_count": 12,
+      "words_length": 72,
+      "tweet_length": 117,
       "sentiment_score": 0.807,
-      "sentiment": "positive"
+      "hashtags": [],
+      "cashtags": [],
+      "found_urls": []
     }
   ]
 }
@@ -215,23 +223,35 @@ The tweets endpoint returns the account scrape output produced by the runner, en
 
 This endpoint returns the raw X account scrape shape, plus the enrichment fields added by Python.
 
-| Field             | Meaning                                   |
-|-------------------|-------------------------------------------|
-| `id`              | Stable tweet identifier extracted from X  |
-| `text`            | Tweet text                                |
-| `timestamp`       | Tweet timestamp in ISO format             |
-| `likes`           | Like count as returned by the runner      |
-| `retweets`        | Retweet count as returned by the runner   |
-| `replies`         | Reply count as returned by the runner     |
-| `views`           | View count as returned by the runner      |
-| `url`             | Permanent link to the tweet               |
-| `media`           | Media metadata returned by the runner     |
-| `isQuote`         | Whether the item is a quote tweet         |
-| `isRetweet`       | Whether the item is a retweet             |
-| `platform`        | Source platform                           |
-| `words_count`     | Count of words longer than 3 characters   |
-| `sentiment_score` | VADER compound sentiment score            |
-| `sentiment`       | Simple label derived from sentiment score |
+| Field              | Meaning                                                                  |
+|--------------------|--------------------------------------------------------------------------|
+| `tweet_id`         | Stable tweet identifier                                                  |
+| `tweet_url`        | Permanent URL to the tweet                                               |
+| `content_hash`     | BLAKE2b hash derived from the author, timestamp, and normalized body     |
+| `engagement_hash`  | BLAKE2b hash derived from reply, repost, like, bookmark, and view counts |
+| `account_name`     | Author display name                                                      |
+| `username`         | X username without `@`                                                   |
+| `body`             | Normalized tweet text                                                    |
+| `time`             | Tweet timestamp                                                          |
+| `sentiment`        | `positive`, `neutral`, or `negative`                                     |
+| `verified`         | Whether the account is detected as verified                              |
+| `has_media`        | Whether the tweet contains media                                         |
+| `has_photo`        | Whether the tweet contains a photo                                       |
+| `has_video`        | Whether the tweet contains a video                                       |
+| `engagement_count` | Combined engagement metric                                               |
+| `tweet_weight`     | Bounded tweet scoring value                                              |
+| `replies_count`    | Number of replies                                                        |
+| `reposts`          | Number of reposts                                                        |
+| `likes`            | Number of likes                                                          |
+| `bookmarks`        | Number of bookmarks                                                      |
+| `views`            | Number of views                                                          |
+| `words_count`      | Number of words longer than 3 characters                                 |
+| `words_length`     | Total character count across those words                                 |
+| `tweet_length`     | Total character count of the normalized body                             |
+| `sentiment_score`  | VADER compound sentiment score                                           |
+| `hashtags`         | Hashtags extracted from the tweet                                        |
+| `cashtags`         | Cashtags extracted from the tweet                                        |
+| `found_urls`       | URLs extracted from the tweet body                                       |
 
 #### Curl
 
@@ -275,36 +295,48 @@ This endpoint is meant for timeline-style pages, including X list timelines and 
 
 #### Response shape
 
+The timeline endpoint returns the same normalized `Tweet` object used by the Python enrichment layer.
+
 ```json
 {
   "url": "https://x.com/i/lists/1234567890",
   "limit": 100,
-  "count": 100,
+  "count": 1,
   "elapsed_ms": 31204,
   "tweets": [
     {
       "tweet_id": "1940123456789012345",
-      "tweet_url": "https://x.com/user/status/1940123456789012345",
+      "tweet_url": "https://x.com/Raghavak0nSol/status/1940123456789012345",
+      "content_hash": "0c4d8f10d5c3c8c4e6d2f7f1b58a6d22",
+      "engagement_hash": "c57e1a7df5bdab6c6f0ef4df6c1e71c7",
       "account_name": "Memecoin Daddy",
       "username": "Raghavak0nSol",
-      "verified": true,
-      "body": "3x $VOLE ...",
+      "body": "3x $VOLE",
       "time": "2026-08-02T09:10:17.000Z",
+      "sentiment": "positive",
+      "verified": true,
+      "has_media": true,
+      "has_photo": true,
+      "has_video": false,
+      "engagement_count": 21025,
+      "tweet_weight": 5,
+      "replies_count": 79,
+      "reposts": 1119,
+      "likes": 18594,
+      "bookmarks": 1337,
+      "views": 0,
+      "words_count": 1,
+      "words_length": 2,
+      "tweet_length": 10,
+      "sentiment_score": 0.8123,
       "hashtags": [
         "SOL",
         "VOLE"
       ],
-      "has_media": true,
-      "has_photo": true,
-      "has_video": false,
-      "replies": 79,
-      "reposts": 1119,
-      "likes": 18594,
-      "bookmarks": 1337,
-      "views": 645918,
-      "words_count": 4,
-      "sentiment_score": 0.8123,
-      "sentiment": "positive"
+      "cashtags": [
+        "VOLE"
+      ],
+      "found_urls": []
     }
   ]
 }
@@ -327,7 +359,7 @@ curl -X POST http://localhost:9096/v1/scrape/timeline   -H "Content-Type: applic
 
 Stream tweets from one X account.
 
-This WebSocket endpoint accepts the same request shape as the tweets POST endpoint, but returns items incrementally as they are scraped.
+The WebSocket endpoint returns the normalized `Tweet` model used by the Python processing layer, sending each tweet as soon as it becomes available.
 
 #### Request body
 
@@ -360,26 +392,33 @@ Each item is streamed like this:
 {
   "type": "item",
   "data": {
-    "id": "2085377974396752305",
-    "text": "Terafab Texas will be the largest and most valuable building on Earth by far.\n\nAnd it will be stunningly beautiful.",
-    "timestamp": "2026-08-06T14:50:28.000Z",
-    "likes": "74K",
-    "retweets": "9.4K",
-    "replies": "5.5K",
-    "views": "10M",
-    "url": "https://x.com/elonmusk/status/2085377974396752305",
-    "media": {
-      "images": [
-        "https://pbs.twimg.com/amplify_video_thumb/2085361439267491840/img/hKoDHwGl-6I7_m6o.jpg"
-      ],
-      "hasVideo": true
-    },
-    "isQuote": false,
-    "isRetweet": true,
-    "platform": "twitter",
+    "tweet_id": "2085377974396752305",
+    "tweet_url": "https://x.com/elonmusk/status/2085377974396752305",
+    "content_hash": "6f0c2e0e5d4c6f2d8d8a9f0b2c2c6a18",
+    "engagement_hash": "4c4a4f2dd0c7fdc3bd7ad5e9a16f5d12",
+    "account_name": "Elon Musk",
+    "username": "elonmusk",
+    "body": "Terafab Texas will be the largest and most valuable building on Earth by far.",
+    "time": "2026-08-06T14:50:28.000Z",
+    "sentiment": "positive",
+    "verified": true,
+    "has_media": true,
+    "has_photo": false,
+    "has_video": true,
+    "engagement_count": 84874,
+    "tweet_weight": 5,
+    "replies_count": 5500,
+    "reposts": 9400,
+    "likes": 74000,
+    "bookmarks": 0,
+    "views": 10000000,
     "words_count": 12,
+    "words_length": 72,
+    "tweet_length": 117,
     "sentiment_score": 0.807,
-    "sentiment": "positive"
+    "hashtags": [],
+    "cashtags": [],
+    "found_urls": []
   }
 }
 ```
@@ -440,26 +479,39 @@ The server sends one message per tweet:
 {
   "type": "item",
   "data": {
-    "tweet_id": "1940123456789012345",
-    "tweet_url": "https://x.com/user/status/1940123456789012345",
-    "account_name": "Memecoin Daddy",
-    "username": "Raghavak0nSol",
-    "verified": true,
-    "body": "3x $VOLE ...",
-    "time": "2026-08-02T09:10:17.000Z",
-    "hashtags": ["SOL", "VOLE"],
-    "has_media": true,
-    "has_photo": true,
-    "has_video": false,
-    "replies": 79,
-    "reposts": 1119,
-    "likes": 18594,
-    "bookmarks": 1337,
-    "views": 645918,
-    "words_count": 4,
-    "sentiment_score": 0.8123,
-    "sentiment": "positive"
-  }
+      "tweet_id": "1940123456789012345",
+      "tweet_url": "https://x.com/Raghavak0nSol/status/1940123456789012345",
+      "content_hash": "0c4d8f10d5c3c8c4e6d2f7f1b58a6d22",
+      "engagement_hash": "c57e1a7df5bdab6c6f0ef4df6c1e71c7",
+      "account_name": "Memecoin Daddy",
+      "username": "Raghavak0nSol",
+      "body": "3x $VOLE",
+      "time": "2026-08-02T09:10:17.000Z",
+      "sentiment": "positive",
+      "verified": true,
+      "has_media": true,
+      "has_photo": true,
+      "has_video": false,
+      "engagement_count": 21025,
+      "tweet_weight": 5,
+      "replies_count": 79,
+      "reposts": 1119,
+      "likes": 18594,
+      "bookmarks": 1337,
+      "views": 0,
+      "words_count": 1,
+      "words_length": 2,
+      "tweet_length": 10,
+      "sentiment_score": 0.8123,
+      "hashtags": [
+        "SOL",
+        "VOLE"
+      ],
+      "cashtags": [
+        "VOLE"
+      ],
+      "found_urls": []
+    }
 }
 ```
 
@@ -484,17 +536,13 @@ If an error occurs, the server sends:
 
 This endpoint is the streamed version of the timeline scraper. Use it when the target page is large and you want the data as soon as the browser finds it.
 
-## Output contracts
+## Output contract
 
-The service currently returns two related but different tweet shapes:
+All API and WebSocket scrape results are normalized through the Python `Tweet` model.
 
-### Account scrape output
-Returned by `POST /v1/scrape/tweets` and its WebSocket counterpart.
-This output reflects the account scraping pipeline and includes the raw X-style fields used by the runner, plus Python enrichment fields.
+The Node/xActions runner may produce different raw structures internally depending on the scrape mode, but the Python processing layer converts those results into the same application-level `Tweet` representation before returning them to clients.
 
-### Timeline scrape output
-Returned by `POST /v1/scrape/timeline` and its WebSocket counterpart.
-This output is the normalized timeline shape used by the downstream pipeline.
+This means consumers of the API should rely on the `Tweet` model rather than the internal xActions response format.
 
 ## stop_date
 
@@ -513,58 +561,216 @@ That makes `stop_date` useful for:
 - lower response latency
 - less wasted time on old content
 
-## Extracted tweet data
+## Tweet data model
 
-The scraper returns richer tweet objects than the old version.
+Every scraped tweet is normalized into the `Tweet` Pydantic model before it is returned by the API.
 
-A typical extracted item can include:
+The model contains the original scraped information together with derived fields calculated by the Python processing layer.
+
+### Identity
 
 - `tweet_id`
 - `tweet_url`
+- `content_hash`
+
+### Author
+
 - `account_name`
 - `username`
 - `verified`
+
+### Content
+
 - `body`
 - `time`
 - `hashtags`
+- `cashtags`
+- `found_urls`
+
+### Media
+
 - `has_media`
 - `has_photo`
 - `has_video`
-- `replies`
+
+### Engagement
+
+- `engagement_count`
+- `engagement_hash`
+- `replies_count`
 - `reposts`
 - `likes`
 - `bookmarks`
 - `views`
 
-Python additionally enriches every tweet with:
+### Text analysis
 
 - `words_count`
+- `words_length`
+- `tweet_length`
 - `sentiment_score`
 - `sentiment`
 
+### Derived identifiers
+
+#### `content_hash`
+
+The content hash is generated using BLAKE2b from:
+
+```text
+username|time|body
+```
+
+This gives the application a stable content fingerprint that can be used for duplicate detection or change tracking.
+
+#### `engagement_hash`
+
+The engagement hash is generated independently from:
+
+```text
+replies_count|reposts|likes|bookmarks|views
+```
+
+This allows downstream systems to detect engagement changes without hashing the entire tweet.
+
+## Engagement normalization
+
+The raw xActions account scraper can return human-readable metrics such as:
+
+```text
+74K
+9.4K
+5.5K
+10M
+```
+
+The Python enrichment layer normalizes these values into integers:
+
+```json
+{
+  "likes": 74000,
+  "reposts": 9400,
+  "replies_count": 5500,
+  "views": 10000000
+}
+```
+
+Supported suffixes are:
+
+- `K`
+- `M`
+- `B`
+
+Plain numeric values are also accepted.
+
+## Text metrics
+
+### `words_count`
+
+Counts words whose length is greater than three characters.
+
+For:
+
+```text
+"this is a very interesting tweet"
+```
+
+the words considered are:
+
+```text
+this
+very
+interesting
+tweet
+```
+
+### `words_length`
+
+The combined character count of the words counted by `words_count`.
+
+### `tweet_length`
+
+The character count of the normalized tweet body.
+
+## Sentiment
+
+VADER is used to calculate the compound sentiment score.
+
+The score is exposed through:
+
+```text
+sentiment_score
+```
+
+and mapped to:
+
+```text
+positive
+neutral
+negative
+```
+
+using the configured thresholds.
+
+## Hashtags, cashtags, and URLs
+
+The Python enrichment layer extracts:
+
+```json
+{
+  "hashtags": ["SOL", "VOLE"],
+  "cashtags": ["VOLE"],
+  "found_urls": []
+}
+```
+
+These fields are normalized into lists so downstream consumers do not need to parse the tweet body again.
+
+## Tweet weight
+
+`tweet_weight` is a derived score based on engagement metrics and capped at `5`.
+
+The current calculation considers:
+
+- views
+- reposts
+- likes
+- replies
+- bookmarks
+
+It is intended as a lightweight ranking signal rather than a universal measure of tweet quality.
+
 ### Field meanings
 
-| Field             | Meaning                                                  |
-|-------------------|----------------------------------------------------------|
-| `tweet_id`        | Stable tweet identifier extracted from the status URL    |
-| `tweet_url`       | Permanent link to the tweet                              |
-| `account_name`    | Clean display name from the author line                  |
-| `username`        | X handle without the `@`                                 |
-| `verified`        | Whether the account appears verified                     |
-| `body`            | Tweet body text                                          |
-| `time`            | Tweet timestamp in ISO format                            |
-| `hashtags`        | Hashtags extracted from the tweet text and hashtag links |
-| `has_media`       | True if the tweet contains media                         |
-| `has_photo`       | True if the tweet contains a photo                       |
-| `has_video`       | True if the tweet contains a video                       |
-| `replies`         | Reply count                                              |
-| `reposts`         | Repost count                                             |
-| `likes`           | Like count                                               |
-| `bookmarks`       | Bookmark count                                           |
-| `views`           | View count                                               |
-| `words_count`     | Count of words longer than 3 characters                  |
-| `sentiment_score` | VADER compound sentiment score                           |
-| `sentiment`       | Simple label derived from sentiment score                |
+| Field              | Meaning                                             |
+|--------------------|-----------------------------------------------------|
+| `tweet_id`         | Stable tweet identifier                             |
+| `tweet_url`        | Permanent tweet URL                                 |
+| `content_hash`     | BLAKE2b fingerprint of the normalized tweet content |
+| `engagement_hash`  | BLAKE2b fingerprint of the engagement metrics       |
+| `account_name`     | Clean display name                                  |
+| `username`         | X handle without `@`                                |
+| `verified`         | Whether the account is detected as verified         |
+| `body`             | Normalized tweet body                               |
+| `time`             | Tweet timestamp                                     |
+| `hashtags`         | Extracted hashtags                                  |
+| `cashtags`         | Extracted cashtags                                  |
+| `found_urls`       | URLs found in the tweet                             |
+| `has_media`        | Whether the tweet contains media                    |
+| `has_photo`        | Whether the tweet contains a photo                  |
+| `has_video`        | Whether the tweet contains a video                  |
+| `engagement_count` | Combined engagement value                           |
+| `tweet_weight`     | Derived tweet score capped at `5`                   |
+| `replies_count`    | Normalized reply count                              |
+| `reposts`          | Normalized repost count                             |
+| `likes`            | Normalized like count                               |
+| `bookmarks`        | Normalized bookmark count                           |
+| `views`            | Normalized view count                               |
+| `words_count`      | Number of words longer than 3 characters            |
+| `words_length`     | Total character count of counted words              |
+| `tweet_length`     | Total character count of the normalized body        |
+| `sentiment_score`  | VADER compound sentiment score                      |
+| `sentiment`        | Sentiment label                                     |
 
 This is the data shape that makes the service useful for ranking, scoring, filtering, and downstream analysis.
 
