@@ -4,7 +4,7 @@ services:
     restart: unless-stopped
     stop_grace_period: 30s
     image: localhost/x-crawler:latest
-    env_file: ./.env
+    env_file: .env/.env.prod
     build:
       context: .
       dockerfile: Dockerfile
@@ -12,6 +12,9 @@ services:
       - "${PORT}:${PORT}"
     environment:
       TZ: UTC
+      HOST: 0.0.0.0
+      PORT: 9096
+      MAX_CONCURRENT_SCRAPES: ${MAX_CONCURRENT_SCRAPES}
       XACTIONS_AUTH_TOKEN: ${XACTIONS_AUTH_TOKEN}
       XACTIONS_SESSION_COOKIE: ${XACTIONS_AUTH_TOKEN}
     networks:
