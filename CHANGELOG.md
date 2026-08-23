@@ -23,6 +23,11 @@ The format loosely follows Keep a Changelog and the project adheres to Semantic 
 - Added `has_media`, `has_photo`, and `has_video` fields.
 - Added normalized account metadata including `account_name`, `username`, and `verified`.
 - Added normalized tweet identity fields including `tweet_id` and `tweet_url`.
+- Added strict X timeline URL validation for search, list, and profile URLs.
+- Added support for X search URLs with a required `q` parameter.
+- Added support for X List URLs.
+- Added support for X profile URLs.
+- Added rejection of unsupported domains and X paths before scraping starts.
 
 ### Changed
 
@@ -38,6 +43,8 @@ The format loosely follows Keep a Changelog and the project adheres to Semantic 
 - Improved timeline extraction and duplicate filtering.
 - Improved timeout handling and scraper error reporting.
 - Improved incremental streaming behavior.
+- Restricted timeline scraping to supported `https://x.com` URL patterns.
+- Improved timeline request validation to reject unsupported X pages before invoking the scraper.
 
 ### Enhanced Tweet Extraction
 

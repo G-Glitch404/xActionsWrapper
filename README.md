@@ -72,6 +72,7 @@ The project is split into a few small pieces so the code stays readable and main
 - `src/__main__.py` starts the API server
 
 That split keeps request validation, endpoint routing, and browser automation from getting tangled together.
+
 ## Request flow
 
 The runtime flow is:
@@ -89,6 +90,123 @@ The runtime flow is:
 11. Text statistics and sentiment are calculated
 12. Hashtags, cashtags, and URLs are extracted
 13. The normalized tweet is returned or streamed to the client
+
+## Testing
+
+The project includes integration tests for the running API and WebSocket endpoints.
+
+The tests are designed to run against an already-running xActionsWrapper instance.
+
+### Install test dependencies
+
+With `uv`:
+
+```bash
+uv add --dev pytest httpx websockets
+```
+
+Or install them from the existing project environment:
+
+```bash
+uv sync
+```
+
+### Run the test suite
+
+```bash
+uv run pytest -q
+```
+
+Optional configuration:
+
+```bash
+TEST_CRAWL_LIMIT=10 \
+TEST_STOP_DATE="2026-02-03" \
+uv run pytest -q
+```
+
+The test verifies:
+
+- the service is reachable
+- the service is ready
+- xActions is connected
+- at least one crawl slot is available
+- the WebSocket connection succeeds
+- streamed events contain valid message data
+- the crawler does not exceed the requested limit
+- a `done` event is received
+- crawler errors are reported correctly
+
+### xActions timeline WebSocket test
+
+The xActions WebSocket integration test uses:
+
+```text
+/v1/ws/scrape-timeline
+```
+
+Set the timeline URL before running the test:
+
+```bash
+TEST_X_TIMELINE_URL="https://x.com/i/lists/0000000000000" \
+uv run pytest -q
+```
+
+The URL can also be an X profile:
+
+```bash
+TEST_X_TIMELINE_URL="https://x.com/ABCDEFG123" \
+uv run pytest -q
+```
+
+or an X search timeline:
+
+```bash
+TEST_X_TIMELINE_URL="https://x.com/search?q=test&src=recent_search_click" \
+uv run pytest -q
+```
+
+Optional configuration:
+
+```bash
+TEST_X_TIMELINE_URL="https://x.com/i/lists/0000000000000" \
+TEST_CRAWL_LIMIT=10 \
+TEST_STOP_DATE="2026-08-03" \
+TEST_WS_TIMEOUT=120 \
+uv run pytest -q
+```
+
+The test verifies:
+
+- the service is reachable
+- Node.js is ready
+- the xActions runner exists
+- at least one scrape slot is available
+- the WebSocket connection succeeds
+- streamed events use the expected event types
+- every streamed item matches the normalized `Tweet` structure
+- tweet IDs and URLs are present
+- engagement values are normalized integers
+- sentiment fields are present and valid
+- hashtags, cashtags, and URLs are returned as lists
+- content and engagement hashes are present
+- duplicate tweet IDs are not streamed
+- the requested limit is respected
+- a final `done` event is received
+- scraper errors fail the test explicitly
+
+### Environment variables used by integration tests
+
+| Variable                | Purpose                                              | Default                 |
+|-------------------------|------------------------------------------------------|-------------------------|
+| `CRAWLER_BASE_URL`      | Base URL of the running crawler service              | `http://localhost:9096` |
+| `TEST_X_TIMELINE_URL`   | X timeline URL used by the timeline WebSocket test   | X List example          |
+| `TEST_CRAWL_LIMIT`      | Maximum number of items requested by the test        | `100`                   |
+| `TEST_STOP_DATE`        | Optional crawl cutoff date                           | unset                   |
+| `TEST_REQUEST_TIMEOUT`  | HTTP readiness timeout                               | `120`                   |
+| `TEST_WS_TIMEOUT`       | WebSocket connection/message timeout                 | `120`                   |
+
+Tests that require a target channel or timeline are skipped when the corresponding environment variable is not configured.
 
 ## API endpoints
 
@@ -268,18 +386,32 @@ curl -X POST http://localhost:9096/v1/scrape/tweets   -H "Content-Type: applicat
 
 ### `POST /v1/scrape/timeline`
 
-Scrape tweets from any timeline URL.
+Scrape tweets from supported X timeline URLs.
 
-This endpoint is meant for timeline-style pages, including X list timelines and similar timeline views that can be reached from a URL.
+#### URL validation
+
+The timeline endpoint currently accepts:
+
+- X search URLs containing a non-empty `q` parameter
+- X List URLs using the `/i/lists/{list_id}` format
+- X profile URLs using the standard `/username` format
+
+Examples:
+
+```text
+https://x.com/search?q=test&src=recent_search_click
+https://x.com/i/lists/0000000000000
+https://x.com/ABCDEFG123
+```
 
 #### Request body
 
 ```json
 {
-  "url": "https://x.com/i/lists/1234567890",
+  "url": "https://x.com/i/lists/0000000000000",
   "limit": 100,
   "timeout_seconds": 120,
-  "stop_date": "2026-02-03"
+  "stop_date": "2026-08-03"
 }
 ```
 
@@ -299,7 +431,7 @@ The timeline endpoint returns the same normalized `Tweet` object used by the Pyt
 
 ```json
 {
-  "url": "https://x.com/i/lists/1234567890",
+  "url": "https://x.com/i/lists/0000000000000",
   "limit": 100,
   "count": 1,
   "elapsed_ms": 31204,
@@ -346,107 +478,18 @@ The timeline endpoint returns the same normalized `Tweet` object used by the Pyt
 
 ```bash
 curl -X POST http://localhost:9096/v1/scrape/timeline   -H "Content-Type: application/json"   -d '{
-    "url": "https://x.com/i/lists/1234567890",
+    "url": "https://x.com/i/lists/0000000000000",
     "limit": 100,
     "timeout_seconds": 120,
-    "stop_date": "2026-02-03"
+    "stop_date": "2026-08-03"
   }'
 ```
 
 ---
 
-### `WS /v1/ws/tweets`
-
-Stream tweets from one X account.
-
-The WebSocket endpoint returns the normalized `Tweet` model used by the Python processing layer, sending each tweet as soon as it becomes available.
-
-#### Request body
-
-```json
-{
-  "username": "elonmusk",
-  "limit": 10,
-  "timeout_seconds": 120,
-  "stop_date": "2026-02-03"
-}
-```
-
-#### Fields
-
-| Field             | Type | Description                                      |
-|-------------------|------|--------------------------------------------------|
-| `username`        | str  | X username to scrape                             |
-| `limit`           | int  | Maximum number of tweets to fetch                |
-| `timeout_seconds` | int  | Maximum time allowed for the scrape              |
-| `stop_date`       | date | Optional cutoff date in `YYYY-MM-DD` format      |
-| `auth_token`      | str  | Optional X auth cookie passed into the container |
-
-#### Streamed Messages
-
-The WebSocket endpoint returns the same tweet shape as `POST /v1/scrape/tweets`, but sends each tweet as soon as it is available.
-
-Each item is streamed like this:
-
-```json
-{
-  "type": "item",
-  "data": {
-    "tweet_id": "2085377974396752305",
-    "tweet_url": "https://x.com/elonmusk/status/2085377974396752305",
-    "content_hash": "6f0c2e0e5d4c6f2d8d8a9f0b2c2c6a18",
-    "engagement_hash": "4c4a4f2dd0c7fdc3bd7ad5e9a16f5d12",
-    "account_name": "Elon Musk",
-    "username": "elonmusk",
-    "body": "Terafab Texas will be the largest and most valuable building on Earth by far.",
-    "time": "2026-08-06T14:50:28.000Z",
-    "sentiment": "positive",
-    "verified": true,
-    "has_media": true,
-    "has_photo": false,
-    "has_video": true,
-    "engagement_count": 84874,
-    "tweet_weight": 5,
-    "replies_count": 5500,
-    "reposts": 9400,
-    "likes": 74000,
-    "bookmarks": 0,
-    "views": 10000000,
-    "words_count": 12,
-    "words_length": 72,
-    "tweet_length": 117,
-    "sentiment_score": 0.807,
-    "hashtags": [],
-    "cashtags": [],
-    "found_urls": []
-  }
-}
-```
-
-When the scrape finishes, the server sends:
-
-```json
-{
-  "type": "done"
-}
-```
-
-If an error occurs, the server sends:
-
-```json
-{
-  "type": "error",
-  "detail": "..."
-}
-```
-
-#### Usage Note
-
-This endpoint is best when you want to process results as they arrive instead of waiting for the full scrape to finish.
-
 ## `WS /v1/ws/scrape-timeline`
 
-Stream tweets from any timeline URL.
+Stream tweets from supported X timeline URLs.
 
 This WebSocket endpoint works with timeline-style pages, including X list timelines and other timeline views that can be reached from a URL.
 
@@ -454,10 +497,10 @@ This WebSocket endpoint works with timeline-style pages, including X list timeli
 
 ```json
 {
-  "url": "https://x.com/i/lists/1234567890",
+  "url": "https://x.com/i/lists/0000000000000",
   "limit": 100,
   "timeout_seconds": 120,
-  "stop_date": "2026-02-03"
+  "stop_date": "2026-08-03"
 }
 ```
 
@@ -535,6 +578,95 @@ If an error occurs, the server sends:
 ### Usage Note
 
 This endpoint is the streamed version of the timeline scraper. Use it when the target page is large and you want the data as soon as the browser finds it.
+
+### `WS /v1/ws/tweets`
+
+Stream tweets from one X account.
+
+The WebSocket endpoint returns the normalized `Tweet` model used by the Python processing layer, sending each tweet as soon as it becomes available.
+
+#### Request body
+
+```json
+{
+  "username": "elonmusk",
+  "limit": 10,
+  "timeout_seconds": 120,
+  "stop_date": "2026-08-03"
+}
+```
+
+#### Fields
+
+| Field             | Type | Description                                      |
+|-------------------|------|--------------------------------------------------|
+| `username`        | str  | X username to scrape                             |
+| `limit`           | int  | Maximum number of tweets to fetch                |
+| `timeout_seconds` | int  | Maximum time allowed for the scrape              |
+| `stop_date`       | date | Optional cutoff date in `YYYY-MM-DD` format      |
+| `auth_token`      | str  | Optional X auth cookie passed into the container |
+
+#### Streamed Messages
+
+The WebSocket endpoint returns the same tweet shape as `POST /v1/scrape/tweets`, but sends each tweet as soon as it is available.
+
+Each item is streamed like this:
+
+```json
+{
+  "type": "item",
+  "data": {
+    "tweet_id": "2085377974396752305",
+    "tweet_url": "https://x.com/elonmusk/status/2085377974396752305",
+    "content_hash": "6f0c2e0e5d4c6f2d8d8a9f0b2c2c6a18",
+    "engagement_hash": "4c4a4f2dd0c7fdc3bd7ad5e9a16f5d12",
+    "account_name": "Elon Musk",
+    "username": "elonmusk",
+    "body": "Terafab Texas will be the largest and most valuable building on Earth by far.",
+    "time": "2026-08-06T14:50:28.000Z",
+    "sentiment": "positive",
+    "verified": true,
+    "has_media": true,
+    "has_photo": false,
+    "has_video": true,
+    "engagement_count": 84874,
+    "tweet_weight": 5,
+    "replies_count": 5500,
+    "reposts": 9400,
+    "likes": 74000,
+    "bookmarks": 0,
+    "views": 10000000,
+    "words_count": 12,
+    "words_length": 72,
+    "tweet_length": 117,
+    "sentiment_score": 0.807,
+    "hashtags": [],
+    "cashtags": [],
+    "found_urls": []
+  }
+}
+```
+
+When the scrape finishes, the server sends:
+
+```json
+{
+  "type": "done"
+}
+```
+
+If an error occurs, the server sends:
+
+```json
+{
+  "type": "error",
+  "detail": "..."
+}
+```
+
+#### Usage Note
+
+This endpoint is best when you want to process results as they arrive instead of waiting for the full scrape to finish.
 
 ## Output contract
 
