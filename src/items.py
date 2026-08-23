@@ -2,12 +2,13 @@ import os
 import re
 import datetime as dt
 
+from urllib.parse import parse_qs, urlsplit
 from typing import Any, Optional
 
 from pydantic import BaseModel, Field, field_validator
 
-DEFAULT_TIMEOUT_SECONDS = int(os.getenv("DEFAULT_TIMEOUT_SECONDS", "120"))
-USERNAME_RE = re.compile(r"^[A-Za-z0-9_]{1,15}$")
+DEFAULT_TIMEOUT_SECONDS: int = int(os.getenv("DEFAULT_TIMEOUT_SECONDS", "120"))
+USERNAME_RE: Any = re.compile(r"^[A-Za-z0-9_]{1,15}$")
 
 
 class ScrapeRequest(BaseModel):
@@ -28,20 +29,43 @@ class ScrapeRequest(BaseModel):
 
 
 class ScrapeTimelineRequest(BaseModel):
-    url: str = Field(min_length=1, max_length=500)
+    url: str = Field(min_length=1, max_length=1024)
     limit: int = Field(default=100, ge=1, le=10_000)
-    auth_token: Optional[str] = Field(default=None, min_length=1, max_length=512)
-    timeout_seconds: int = Field(default=DEFAULT_TIMEOUT_SECONDS, ge=10, le=601)
+    auth_token: Optional[str] = Field(default=None, min_length=1, max_length=128)
+    timeout_seconds: int = Field(default=DEFAULT_TIMEOUT_SECONDS, ge=10, le=600)
     stop_date: Optional[dt.date] = None
 
     @field_validator("url")
     @classmethod
     def normalize_url(cls, value: str) -> str:
-        """ ensures url is valid """
+        """ validate and normalize supported x.com timeline urls """
         value: str = value.strip()
         if not value:
             raise ValueError("url cannot be empty")
-        return value
+
+        parsed: Any = urlsplit(value)
+
+        if parsed.scheme != "https" or parsed.hostname != "x.com":
+            raise ValueError("only https://x.com URLs are supported")
+
+        if parsed.username or parsed.password or parsed.port:
+            raise ValueError("invalid x.com URL")
+
+        path: str = parsed.path.rstrip("/")
+
+        if re.fullmatch(r"/search", path):
+            query = parse_qs(parsed.query)
+            if not query.get("q", [""])[0].strip():
+                raise ValueError("search URL must contain a non-empty q parameter")
+            return value
+
+        if re.fullmatch(r"/i/lists/\d+", path):
+            return value
+
+        if re.fullmatch(r"/[A-Za-z0-9_]{1,15}", path):
+            return value
+
+        raise ValueError("unsupported x.com URL; expected a search, list, or profile URL")
 
 
 class Tweet(BaseModel):
@@ -79,7 +103,7 @@ class ScrapeResponse(BaseModel):
     limit: int
     count: int
     elapsed_ms: int
-    tweets: list[dict[str, Any]]
+    tweets: list[Tweet]
 
 
 class ScrapeTimelineResponse(BaseModel):
@@ -87,4 +111,4 @@ class ScrapeTimelineResponse(BaseModel):
     limit: int
     count: int
     elapsed_ms: int
-    tweets: list[dict[str, Any]]
+    tweets: list[Tweet]
