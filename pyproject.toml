@@ -9,3 +9,9 @@ dependencies = [
     "uvicorn[standard]>=0.52.1",
     "vadersentiment>=3.3.2",
 ]
+
+[dependency-groups]
+dev = [
+    "httpx>=0.28.1",
+    "pytest>=9.1.1",
+]
