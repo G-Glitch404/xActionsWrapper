@@ -27,7 +27,7 @@ app = FastAPI(
 )
 
 
-async def _collect(generator) -> list[dict[str, Any]]:
+async def _collect(generator: AsyncGenerator[Any, None]) -> list[Any]:
     """ collect an async generator into a list """
     return [item async for item in generator]
 
@@ -78,7 +78,7 @@ async def _stream(websocket: WebSocket, generator: AsyncGenerator[Tweet, None]) 
     async for item in generator:
         await websocket.send_json({
             "type": "item",
-            "data": item.model_dump_json(ensure_ascii=False, indent=2)
+            "data": item.model_dump(mode="json")
         })
 
     await websocket.send_json({"type": "done"})
@@ -172,7 +172,7 @@ async def scrape_tweets(req: ScrapeRequest) -> ScrapeResponse:
     """
     started = time.perf_counter()
 
-    tweets = await _collect(
+    tweets: list[Tweet] = await _collect(
         _scrape(
             mode="tweets",
             target=req.username,
@@ -207,7 +207,7 @@ async def scrape_timeline(req: ScrapeTimelineRequest) -> ScrapeTimelineResponse:
     """
     started = time.perf_counter()
 
-    tweets = await _collect(
+    tweets: list[Tweet] = await _collect(
         _scrape(
             mode="scrape_timeline",
             target=req.url,

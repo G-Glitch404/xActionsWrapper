@@ -1,8 +1,10 @@
+import os
 import asyncio
+import signal
 import hashlib
 import json
-import os
 import re
+
 import datetime as dt
 
 from pathlib import Path
@@ -155,23 +157,7 @@ async def _run_xactions(
     auth_token: Optional[str] = None,
     timeout_seconds: int = 120,
 ) -> AsyncGenerator[Tweet, None]:
-    """
-     run the xactions node scraper and stream parsed tweet dictionaries
-
-     Args:
-         mode: scraper mode passed to the node runner
-         target: username or timeline url depending on mode
-         limit: maximum number of tweets to collect
-         stop_date: optional cutoff date in yyyy-mm-dd format
-         auth_token: optional x auth cookie passed into the subprocess environment
-         timeout_seconds: maximum number of seconds to wait for output before timing out
-
-     yields:
-         enriched tweet dictionaries streamed from stdout as Tweet object
-
-     raises:
-         HTTPException: if the input is invalid, the subprocess times out, or the runner fails
-    """
+    """ run the xactions scraper and stream parsed tweets """
     if stop_date and not isinstance(stop_date, str):
         raise HTTPException(
             status_code=422,
@@ -190,12 +176,15 @@ async def _run_xactions(
         mode,
         target,
         str(limit),
-        stop_date,
+        stop_date or "",
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
         cwd=str(APP_DIR.parent),
         env=env,
+        start_new_session=True,
     )
+
+    stderr_task = asyncio.create_task(proc.stderr.read())
 
     try:
         while True:
@@ -207,25 +196,40 @@ async def _run_xactions(
             if not line: break
             for tweet in _parse_output(line):
                 yield tweet
-    except asyncio.TimeoutError as exc:
-        proc.kill()
-        await proc.wait()
-        raise HTTPException(status_code=504, detail="scrape timed out") from exc
 
-    stderr: bytes = await proc.stderr.read()
-    await proc.wait()
-    if proc.returncode != 0:
+        await proc.wait()
+        stderr = await stderr_task
+
+        if proc.returncode != 0:
+            raise HTTPException(
+                status_code=502,
+                detail=(stderr.decode("utf-8", errors="replace").strip() or "scrape failed with unknown error")
+            )
+
+    except asyncio.TimeoutError as exc:
         raise HTTPException(
-            status_code=502,
-            detail=stderr.decode("utf-8", errors="replace").strip() or "scrape failed with unkown error",
-        )
+            status_code=504,
+            detail="scrape timed out",
+        ) from exc
+
+    finally:
+        if proc.returncode is None:
+            try: os.killpg(proc.pid, signal.SIGKILL)
+            except ProcessLookupError: pass
+
+        await proc.wait()
+
+        if not stderr_task.done():
+            stderr_task.cancel()
+            try: await stderr_task
+            except asyncio.CancelledError: pass
 
 
 async def run_xactions(
     mode: Literal["tweets", "scrape_timeline"],
     target: str,
     limit: int,
-    stop_date: dt.date,
+    stop_date: Optional[dt.date],
     timeout_seconds: int,
     auth_token: Optional[str],
 ) -> AsyncGenerator[Tweet, None]:
@@ -250,7 +254,7 @@ async def run_xactions(
         mode=mode,
         target=target,
         limit=limit,
-        stop_date=stop_date.strftime("%Y-%m-%d"),
+        stop_date=stop_date.strftime("%Y-%m-%d") if stop_date else "",
         auth_token=auth_token,
         timeout_seconds=timeout_seconds,
     ):
