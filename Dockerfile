@@ -54,7 +54,7 @@ COPY pyproject.toml uv.lock /app/
 RUN uv sync --locked --no-dev
 
 RUN npm init -y \
- && npm install xactions \
+ && npm install xactions puppeteer puppeteer-extra puppeteer-extra-plugin-stealth \
  && npm cache clean --force
 
 COPY src /app/src
@@ -64,4 +64,4 @@ RUN mkdir -p /data/.xactions
 EXPOSE 9096
 
 ENTRYPOINT ["tini", "--"]
-CMD ["uv", "run", "--env-file", ".env/.env.prod", "uvicorn", "src.api:app", "--host", "0.0.0.0", "--port", "9096"]
+CMD ["uv", "run", "uvicorn", "src.api:app", "--host", "0.0.0.0", "--port", "9096"]
