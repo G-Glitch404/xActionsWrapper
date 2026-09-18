@@ -3,6 +3,11 @@ services:
     container_name: x-crawler-app
     restart: unless-stopped
     stop_grace_period: 30s
+    mem_limit: 2g
+    mem_reservation: 1g
+    cpus: 1
+    pids_limit: 256
+    mem_swappiness: 0
     image: localhost/x-crawler:latest
     env_file: .env/.env.prod
     build:
